@@ -1,0 +1,32 @@
+{
+  "name": "",
+  "homePage": "",
+  "repos": {
+    "https://github.com/nf-core/modules.git": {
+      "modules": {
+        "nf-core": {
+          "methyldackel/extract": {
+            "branch": "master",
+            "git_sha": "c8df5757c72362907a43de49a6b20bd4998907a0",
+            "installed_by": ["modules"]
+          },
+          "picard/markduplicates": {
+            "branch": "master",
+            "git_sha": "df124e87c74d8b40285199f8cc20151f5aa57255",
+            "installed_by": ["modules"]
+          },
+          "samtools/index": {
+            "branch": "master",
+            "git_sha": "c8be52dba1166c678e74cda9c3a3c221635c8bb1",
+            "installed_by": ["modules"]
+          },
+          "samtools/merge": {
+            "branch": "master",
+            "git_sha": "9a48bce39a67e2cb34b8f125fc1d50f0ad98b616",
+            "installed_by": ["modules"]
+          }
+        }
+      }
+    }
+  }
+}

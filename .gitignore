@@ -1,0 +1,6 @@
+work/
+.nextflow*
+containers/
+work/
+assets/
+test/
