@@ -3,12 +3,13 @@ process GENERATE_REPORT {
     
     input:
     tuple val(meta), path(zscore), path(beta_value), path(snp_pileup), path(snp_ff)
+    path(meta_file)
     
     output:
     tuple val(meta), path("*_report.tsv"), emit: report
     
     script:
-    def meta_arg = params.meta ? "--meta ${params.meta}" : ""
+    def meta_arg = meta_file && meta_file.name != 'null' ? "--meta ${meta_file}" : ""
     """
     generate_report.py \\
         --sample-id ${meta.id} \\

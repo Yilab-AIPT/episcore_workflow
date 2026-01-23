@@ -24,16 +24,20 @@ workflow REPORT {
         .set { ch_merged_input }
 
     // Generate individual reports per sample
-    GENERATE_REPORT(ch_merged_input)
+    def meta_file = params.meta ? file(params.meta) : []
+    GENERATE_REPORT(
+        ch_merged_input,
+        meta_file
+    )
     
     // Collect all individual reports and merge into summary
-    GENERATE_REPORT.out.report
+    def ch_all_reports = GENERATE_REPORT.out.report
         .map { meta, report -> report }
         .collect()
-        .set { ch_all_reports }
     
     COLLECT_REPORTS(ch_all_reports)
     
     emit:
-    summary = COLLECT_REPORTS.out.summary
+    // summary = COLLECT_REPORTS.out.summary
+    report = GENERATE_REPORT.out.report
 }
