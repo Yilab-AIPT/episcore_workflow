@@ -341,6 +341,10 @@ def main(
             output_path = Path(f'{output_prefix}_ff.tsv')
             console.print(f"\n[cyan]Saving all results to {output_path}...[/cyan]")
             results_df = pd.DataFrame(all_results_list, columns=['chr', 'ff_before_mq', 'ff_after_mq'])
+            # Ensure output directory exists
+            output_dir = output_path.parent
+            if not output_dir.exists():
+                output_dir.mkdir(parents=True, exist_ok=True)
             results_df.to_csv(output_path, sep='\t', index=False)
             
             # Display summary table

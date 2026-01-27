@@ -79,6 +79,14 @@ def read_txt_file_lazy(file_path: Path, required_columns: List[str], ncpgs: int 
         # Select only the required columns to save memory (lazy operation)
         lazy_df = lazy_df.select(required_columns)
         
+        # Ensure consistent schema across all files by casting to standard types
+        # This prevents schema mismatch errors during concatenation
+        lazy_df = lazy_df.with_columns([
+            pl.col("name").cast(pl.String),
+            pl.col("prob_class_1").cast(pl.Float64),
+            pl.col("mTcount").cast(pl.Float64)
+        ])
+        
         return lazy_df
         
     except Exception as e:
@@ -152,7 +160,7 @@ def merge_txt_files(
     # Now collect the data (this is where the actual computation happens)
     # Use streaming mode for better memory efficiency with large datasets
     try:
-        output_df = output_lazy.collect(streaming=True)
+        output_df = output_lazy.collect(engine="streaming")
     except Exception as e:
         # Fallback to non-streaming if streaming fails
         console.print("[yellow]⚠[/yellow] Streaming mode failed, falling back to standard collection...")
