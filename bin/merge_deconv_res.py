@@ -2,8 +2,9 @@
 """
 Merge multiple text files containing genomic data.
 
-This script merges multiple text files with columns 'name', 'prob_class_1', and 'mTcount',
-optionally filters by mTcount threshold, and outputs a merged file with 'name' and 'prob_class_1'.
+This script merges multiple text files with columns 'name', 'prob_class_1', 'mTcount',
+and 'insert_size', optionally filters by mTcount threshold, and outputs a merged file
+with 'name', 'prob_class_1', and 'insert_size'.
 """
 
 import gc
@@ -84,7 +85,8 @@ def read_txt_file_lazy(file_path: Path, required_columns: List[str], ncpgs: int 
         lazy_df = lazy_df.with_columns([
             pl.col("name").cast(pl.String),
             pl.col("prob_class_1").cast(pl.Float64),
-            pl.col("mTcount").cast(pl.Float64)
+            pl.col("mTcount").cast(pl.Float64),
+            pl.col("insert_size").cast(pl.Int64),
         ])
         
         return lazy_df
@@ -106,12 +108,12 @@ def merge_txt_files(
         ncpgs: Minimum mTcount threshold for filtering (default: 0, no filtering).
         
     Returns:
-        A merged and filtered Polars DataFrame with 'name' and 'prob_class_1' columns.
+        A merged and filtered Polars DataFrame with 'name', 'prob_class_1', and 'insert_size' columns.
         
     Raises:
         ValueError: If no valid data remains after filtering.
     """
-    required_columns = ["name", "prob_class_1", "mTcount"]
+    required_columns = ["name", "prob_class_1", "mTcount", "insert_size"]
     lazy_frames = []
     
     # Build lazy frames for all input files with progress tracking
@@ -155,7 +157,7 @@ def merge_txt_files(
     merged_lazy = pl.concat(lazy_frames, how="vertical")
     
     # Select only the output columns we need (lazy operation)
-    output_lazy = merged_lazy.select(["name", "prob_class_1"])
+    output_lazy = merged_lazy.select(["name", "prob_class_1", "insert_size"])
     
     # Now collect the data (this is where the actual computation happens)
     # Use streaming mode for better memory efficiency with large datasets
@@ -245,9 +247,9 @@ def main(inputs: str, output: str, ncpgs: int) -> None:
     """
     Merge multiple text files containing genomic data.
     
-    This script reads multiple text files with columns 'name', 'prob_class_1', and 'mTcount',
-    merges them together, applies optional filtering based on mTcount threshold,
-    and outputs a file with 'name' and 'prob_class_1' columns.
+    This script reads multiple text files with columns 'name', 'prob_class_1', 'mTcount',
+    and 'insert_size', merges them together, applies optional filtering based on mTcount
+    threshold, and outputs a file with 'name', 'prob_class_1', and 'insert_size' columns.
     
     Args:
         inputs: Space-separated string of input file paths.

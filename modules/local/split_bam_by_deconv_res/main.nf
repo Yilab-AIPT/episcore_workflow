@@ -10,6 +10,7 @@ process SPLIT_BAM_BY_DECONV_RES {
     
     script:
     def prefix = task.ext.prefix ?: "${meta.id}"
+    def args = task.ext.args ?: ""
     """
     set -euo pipefail
     export LC_ALL=C
@@ -21,7 +22,7 @@ process SPLIT_BAM_BY_DECONV_RES {
         --input ${deconv_res_file} \\
         --threshold ${threshold} \\
         --output-dir . \\
-        --chunksize 100000
+        ${args}
     
     # Use samtools view -N to extract reads (fastest method for BAM splitting)
     samtools view -@ ${task.cpus} -b -N target_reads.txt     -o ${prefix}_target.bam ${bam_file}
