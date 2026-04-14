@@ -6,6 +6,8 @@ read names into target and background sets based on a probability threshold.
 The output files can be used with samtools to split BAM files accordingly.
 """
 
+import gzip
+import io
 import sys
 from pathlib import Path
 
@@ -16,8 +18,17 @@ from rich.console import Console
 console = Console()
 
 
+def is_gzipped(file_path: Path) -> bool:
+    """Check if a file is gzip-compressed by reading its magic bytes."""
+    with open(file_path, 'rb') as f:
+        return f.read(2) == b'\x1f\x8b'
+
+
 def detect_file_format(input_path: Path) -> str:
     """Detect whether the input file is txt (TSV) or parquet format.
+
+    Handles gzip-compressed files (e.g. .txt.gz) by inspecting the
+    second-to-last suffix.
 
     Args:
         input_path: Path to the input file.
@@ -28,11 +39,17 @@ def detect_file_format(input_path: Path) -> str:
     Raises:
         ValueError: If file format cannot be determined or is unsupported.
     """
-    suffix = input_path.suffix.lower()
+    suffixes = [s.lower() for s in input_path.suffixes]
 
-    if suffix in ['.txt', '.tsv', '.csv']:
+    # Strip trailing .gz to examine the real extension
+    if suffixes and suffixes[-1] == '.gz':
+        base_suffix = suffixes[-2] if len(suffixes) >= 2 else ''
+    else:
+        base_suffix = suffixes[-1] if suffixes else ''
+
+    if base_suffix in ['.txt', '.tsv', '.csv']:
         return 'txt'
-    elif suffix in ['.parquet', '.pq']:
+    elif base_suffix in ['.parquet', '.pq']:
         return 'parquet'
     else:
         try:
@@ -43,9 +60,13 @@ def detect_file_format(input_path: Path) -> str:
         except Exception:
             pass
 
+        # If gzip-compressed with no recognisable inner extension, assume txt
+        if is_gzipped(input_path):
+            return 'txt'
+
         console.print(
             f"[yellow]Warning: Cannot determine file format from extension "
-            f"'{suffix}', assuming txt/tsv format[/yellow]"
+            f"'{input_path.suffix}', assuming txt/tsv format[/yellow]"
         )
         return 'txt'
 
@@ -69,7 +90,13 @@ def scan_input(
         ValueError: If any required column is missing.
     """
     if file_format == 'txt':
-        lf = pl.scan_csv(input_path, separator='\t')
+        if is_gzipped(input_path):
+            with gzip.open(input_path, 'rb') as f:
+                raw = f.read()
+            lf = pl.read_csv(io.BytesIO(raw), separator='\t').lazy()
+            del raw
+        else:
+            lf = pl.scan_csv(input_path, separator='\t')
     else:
         lf = pl.scan_parquet(input_path)
 

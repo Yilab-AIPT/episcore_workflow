@@ -28,5 +28,8 @@ process SPLIT_BAM_BY_DECONV_RES {
     samtools view -@ ${task.cpus} -b -N target_reads.txt     -o ${prefix}_target.bam ${bam_file}
     samtools view -@ ${task.cpus} -b -N background_reads.txt -o ${prefix}_background.bam ${bam_file}
     samtools view -@ ${task.cpus} -b -N classified_reads.txt -U ${prefix}_unclassified.bam ${bam_file} > /dev/null
+
+    # Remove temporary files
+    rm target_reads.txt background_reads.txt classified_reads.txt
     """
 }
