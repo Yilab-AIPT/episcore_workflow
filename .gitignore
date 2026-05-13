@@ -7,3 +7,6 @@ test/
 notebooks/
 results/
 containers
+*.pyc
+*logs*
+__pycache__/
