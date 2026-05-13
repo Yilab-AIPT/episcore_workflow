@@ -6,7 +6,7 @@ LOG_DIR="${SCRIPT_DIR}/results/grid_search/logs"
 TIMESTAMP="$(date '+%Y%m%d_%H%M%S')"
 LOG_FILE="${LOG_DIR}/grid_search_${TIMESTAMP}.log"
 
-PROFILE="${PROFILE:-at_ref,alioth_local}"
+PROFILE="${PROFILE:-at_ref,alioth_slurm}"
 NF_OPTS="${NF_OPTS:-}"
 DRY_RUN="${DRY_RUN:-false}"
 

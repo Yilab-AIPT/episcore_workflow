@@ -60,7 +60,7 @@ workflow NIPT {
         // Calculate beta-zscore
         CALC_BETA_ZSCORE(ch_splitted_bam)
         CALC_BETA_ZSCORE.out.zscore
-            .set { ch_zscore }
+            .set { ch_beta_zscore }
         CALC_BETA_ZSCORE.out.beta_value
             .set { ch_beta_value }
 
@@ -71,7 +71,7 @@ workflow NIPT {
         ESTIMATE_FF.out.snp_ff
             .set { ch_snp_ff }
     } else {
-        ch_zscore = channel.empty()
+        ch_beta_zscore = channel.empty()
         ch_beta_value = channel.empty()
         ch_snp_pileup = channel.empty()
         ch_snp_ff = channel.empty()
@@ -89,7 +89,7 @@ workflow NIPT {
     // Interfaces for ch_clean_bam/ch_deconv_res/ch_splitted_bam/ch_rc_zscore are left for future development
     if (params.step in ['preprocess', 'deconv', 'split_bam', 'beta_zscore']) {
         REPORT(
-            ch_zscore,
+            ch_beta_zscore,
             ch_beta_value,
             ch_snp_pileup,
             ch_snp_ff
