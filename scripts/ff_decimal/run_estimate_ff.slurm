@@ -9,26 +9,27 @@
 #
 # Usage:
 #     sbatch --job-name=ff_dec_<sample> \
-#            run_estimate_ff.slurm <sample> <pileup_file>
+#            run_estimate_ff.slurm <sample> <pileup_file> <output_dir>
 #
 # Inputs:
 #     sample       : sample name (used as --output-prefix)
 #     pileup_file  : path to the *_pileup.tsv.gz produced by snp_pileup
+#     output_dir   : directory for results (<sample>_ff.tsv written here)
 #
 # Output:
-#     <OUTPUT_DIR>/<sample>_ff.tsv
+#     <output_dir>/<sample>_ff.tsv
 
 set -euo pipefail
 
-sample=${1:?Usage: sbatch run_estimate_ff.slurm <sample> <pileup_file>}
-pileup=${2:?Usage: sbatch run_estimate_ff.slurm <sample> <pileup_file>}
+sample=${1:?Usage: sbatch run_estimate_ff.slurm <sample> <pileup_file> <output_dir>}
+pileup=${2:?Usage: sbatch run_estimate_ff.slurm <sample> <pileup_file> <output_dir>}
+OUTPUT_DIR=${3:?Usage: sbatch run_estimate_ff.slurm <sample> <pileup_file> <output_dir>}
 
 SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 cd "$SCRIPT_DIR"
 
 mkdir -p logs
 
-OUTPUT_DIR=/lustre1/cqyi/syfan/nipt_article_plot/dev_and_test_ff
 mkdir -p "$OUTPUT_DIR"
 
 if [ ! -f "$pileup" ]; then
@@ -38,7 +39,7 @@ fi
 
 NCPUS="${SLURM_CPUS_PER_TASK:-32}"
 
-echo "[$(date)] sample=${sample} pileup=${pileup} cpus=${NCPUS} host=$(hostname)"
+echo "[$(date)] sample=${sample} pileup=${pileup} output_dir=${OUTPUT_DIR} cpus=${NCPUS} host=$(hostname)"
 
 singularity exec -B /lustre1,/lustre2,/appsnew \
     /lustre1/cqyi/syfan/images/common_tools.sif \

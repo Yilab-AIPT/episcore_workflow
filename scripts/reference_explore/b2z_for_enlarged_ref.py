@@ -5,10 +5,8 @@ Enlarged-reference per-chromosome Z-score recomputation.
 Goal:
     Test how the per-chromosome ``s_inter`` values respond to growing the
     reference set with additional dev-set Normal samples. For each enlarged
-    reference size ``N`` (and several random draws per ``N``) we recompute
-    ``hypo_z_inter`` / ``hyper_z_inter`` / ``s_inter`` for every non-reference
-    sample using a fixed combo (threshold=0.5, recall=0.65), then report a
-    per-run MCC.
+    reference size ``N`` (and many random draws per ``N``) we recompute
+    ``s_inter`` for a *fixed* evaluation set and report a per-run MCC.
 
 Inputs:
     --combo-dir : directory containing ``_analyze_zscore.tsv.gz`` and
@@ -17,16 +15,24 @@ Inputs:
     --meta-csv  : sample-level metadata. Must provide
                   ``sample, label, ref_type, set, ff_before_mq``.
 
-The reference candidate pool is ``set == "dev"`` AND ``label == "Normal"``.
-For each ``N`` from ``--n-min`` (default 10) to that pool's size, ``--runs``
-random draws (default 10) are generated. ``N == pool_size`` always uses a
-single run (only one selection is possible).
+Reference candidate pool
+    ``set == "dev"`` AND ``label == "Normal"``. For each ``N`` from
+    ``--n-min`` (default 10) to the pool size, ``--runs`` random draws
+    (default 10000) are generated. Combinations are guaranteed to be
+    unique within a given ``N``; when ``C(pool_size, N) <= runs`` the
+    enumeration is exhaustive (so ``N == pool_size`` uses exactly one run).
+
+Evaluation set (fixed across all runs)
+    All samples that are *not* in the candidate pool, i.e.
+    ``set == "test"`` OR (``set == "dev"`` AND ``label != "Normal"``).
+    Holding the eval set constant makes MCC values directly comparable
+    across runs and across ``N``. ``_classify`` further restricts the
+    contribution to rows whose label is either ``Normal`` or starts with
+    ``T`` (e.g. T21).
 
 Outputs (under ``--output-base/<output-subdir>/``, default
 ``enlarged_reference``):
 
-    ref_n_{N}_run_{run_index}/_reference_zscore.tsv.gz
-    ref_n_{N}_run_{run_index}/_analyze_zscore.tsv.gz
     report.csv
 
 ``report.csv`` columns: ``ref_n, run_index, MCC, TP, TN, FP, FN``.
@@ -40,9 +46,11 @@ The classification rule for the MCC counts is:
 
 from __future__ import annotations
 
+import itertools
 import math
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -59,13 +67,6 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
-# Reuse the writer (and the column ordering it implies) from beta_to_zscore.
-_THIS_DIR = Path(__file__).resolve().parent
-_GRID_SEARCH_DIR = _THIS_DIR.parent / "grid_search"
-if str(_GRID_SEARCH_DIR) not in sys.path:
-    sys.path.insert(0, str(_GRID_SEARCH_DIR))
-from beta_to_zscore import _write_tsv  # noqa: E402
-
 console = Console()
 
 
@@ -73,21 +74,19 @@ console = Console()
 # Loading helpers
 # ---------------------------------------------------------------------------
 
-_REF_SUFFIXES: Tuple[str, ...] = (
-    "hypo_beta",
-    "hyper_beta",
+# Only the columns required for recomputing s_inter and classifying.
+_NEEDED_SUFFIXES: Tuple[str, ...] = (
     "hypo_z_intra",
     "hyper_z_intra",
-    "s_intra",
     "hypo_cpgs_count",
     "hyper_cpgs_count",
 )
 
 
-def _load_combo_table(path: Path) -> pd.DataFrame:
+def _load_combo_table(path: Path, keep_cols: List[str]) -> pd.DataFrame:
     if not path.is_file():
         raise FileNotFoundError(f"Missing combo output: {path}")
-    return pd.read_csv(path, sep="\t", compression="gzip")
+    return pd.read_csv(path, sep="\t", compression="gzip", usecols=keep_cols)
 
 
 def _stack_per_chr(
@@ -95,7 +94,6 @@ def _stack_per_chr(
     chr_list: List[str],
     suffix: str,
     *,
-    fill: float = np.nan,
     dtype: type = np.float64,
 ) -> np.ndarray:
     """Build an ``(n_samples, n_chr)`` matrix from ``chr{n}_{suffix}`` columns."""
@@ -108,8 +106,6 @@ def _stack_per_chr(
         arr = np.nan_to_num(arr, nan=0).astype(dtype, copy=False)
     else:
         arr = arr.astype(dtype, copy=False)
-        if not math.isnan(fill):
-            arr = np.where(np.isnan(arr), fill, arr)
     return arr
 
 
@@ -117,28 +113,15 @@ def _load_combined(
     combo_dir: Path,
     chr_list: List[str],
 ) -> Tuple[List[str], Dict[str, np.ndarray]]:
-    """Concat reference + analyze TSVs and return per-metric matrices.
-
-    Returns
-    -------
-    samples : list[str]
-        Sample IDs (reference rows first, then analyze rows; the order is
-        otherwise preserved from the source files).
-    arrays : dict
-        Keys: ``hypo_beta``, ``hyper_beta``, ``hypo_z_intra``, ``hyper_z_intra``,
-        ``s_intra``, ``hypo_counts``, ``hyper_counts``. Each value is a
-        ``(n_samples, n_chr)`` numpy matrix.
-    """
-    ref_df = _load_combo_table(combo_dir / "_reference_zscore.tsv.gz")
-    an_df = _load_combo_table(combo_dir / "_analyze_zscore.tsv.gz")
-
+    """Concat reference + analyze TSVs and return only the metric arrays we need."""
     keep = ["sample"] + [
-        f"{c}_{suf}" for c in chr_list for suf in _REF_SUFFIXES
+        f"{c}_{suf}" for c in chr_list for suf in _NEEDED_SUFFIXES
     ]
-    ref_df = ref_df.loc[:, keep].copy()
-    an_df = an_df.loc[:, keep].copy()
+    ref_df = _load_combo_table(combo_dir / "_reference_zscore.tsv.gz", keep)
+    an_df = _load_combo_table(combo_dir / "_analyze_zscore.tsv.gz", keep)
 
     combined = pd.concat([ref_df, an_df], axis=0, ignore_index=True)
+    del ref_df, an_df
     if combined["sample"].duplicated().any():
         dups = combined["sample"][combined["sample"].duplicated()].tolist()
         raise ValueError(
@@ -147,13 +130,9 @@ def _load_combined(
         )
 
     samples = combined["sample"].astype(str).tolist()
-
     arrays = {
-        "hypo_beta": _stack_per_chr(combined, chr_list, "hypo_beta"),
-        "hyper_beta": _stack_per_chr(combined, chr_list, "hyper_beta"),
         "hypo_z_intra": _stack_per_chr(combined, chr_list, "hypo_z_intra"),
         "hyper_z_intra": _stack_per_chr(combined, chr_list, "hyper_z_intra"),
-        "s_intra": _stack_per_chr(combined, chr_list, "s_intra"),
         "hypo_counts": _stack_per_chr(
             combined, chr_list, "hypo_cpgs_count", dtype=np.int64,
         ),
@@ -182,124 +161,124 @@ def _load_meta(meta_csv: str, samples: List[str]) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Statistics + s_inter (vectorized over samples and chrs at once)
+# Combo generation (one unique sample-set per "run")
 # ---------------------------------------------------------------------------
 
-def _reference_stats(
-    hypo_z: np.ndarray,
-    hyper_z: np.ndarray,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Per-chr (mean, std) of hypo and hyper z_intra, NaN-safe."""
+def _generate_unique_combos(
+    pool_size: int,
+    N: int,
+    runs: int,
+    rng: np.random.Generator,
+) -> List[np.ndarray]:
+    """Return up to ``runs`` *unique* sorted combinations of ``N`` indices.
+
+    Each returned array contains indices in ``[0, pool_size)``.
+
+    If ``C(pool_size, N) <= runs`` the full set of combinations is enumerated
+    (so e.g. ``N == pool_size`` yields exactly one combo). Otherwise unique
+    random draws are produced via rejection sampling.
+    """
+    if N <= 0 or N > pool_size:
+        raise ValueError(f"Invalid N={N} for pool_size={pool_size}.")
+    total = math.comb(int(pool_size), int(N))
+    if total <= runs:
+        return [
+            np.fromiter(c, dtype=np.int64, count=N)
+            for c in itertools.combinations(range(pool_size), int(N))
+        ]
+    seen: set = set()
+    out: List[np.ndarray] = []
+    max_attempts = runs * 20 + 1000
+    attempts = 0
+    while len(out) < runs and attempts < max_attempts:
+        attempts += 1
+        choice = rng.choice(pool_size, size=N, replace=False)
+        choice.sort()
+        key = choice.tobytes()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(choice.astype(np.int64, copy=False))
+    if len(out) < runs:
+        raise RuntimeError(
+            f"Could only generate {len(out)}/{runs} unique combos for N={N} "
+            f"after {attempts} attempts (pool_size={pool_size})."
+        )
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Vectorized batch evaluation
+# ---------------------------------------------------------------------------
+
+def _evaluate_batch(
+    chosen_batch: np.ndarray,            # (B, N) int indices into pool arrays
+    pool_hypo_z: np.ndarray,             # (P, C)
+    pool_hyper_z: np.ndarray,            # (P, C)
+    eval_hypo_z: np.ndarray,             # (E, C)
+    eval_hyper_z: np.ndarray,            # (E, C)
+    eval_w_hypo: np.ndarray,             # (E, C)
+    eval_w_hyper: np.ndarray,            # (E, C)
+    eval_total_w: np.ndarray,            # (E, C)
+    eval_is_normal: np.ndarray,          # (E,)  bool
+    eval_is_trisomy: np.ndarray,         # (E,)  bool
+    s_inter_cutoff: float,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Vectorized evaluation of B runs sharing the same N.
+
+    Returns (TP, TN, FP, FN, MCC) each shaped (B,).
+    """
+    ref_hypo = pool_hypo_z[chosen_batch]    # (B, N, C)
+    ref_hyper = pool_hyper_z[chosen_batch]  # (B, N, C)
+
     with np.errstate(invalid="ignore"):
-        hypo_means = np.nanmean(hypo_z, axis=0)
-        hypo_stds = np.nanstd(hypo_z, axis=0, ddof=0)
-        hyper_means = np.nanmean(hyper_z, axis=0)
-        hyper_stds = np.nanstd(hyper_z, axis=0, ddof=0)
+        hypo_means = np.nanmean(ref_hypo, axis=1)   # (B, C)
+        hypo_stds = np.nanstd(ref_hypo, axis=1, ddof=0)
+        hyper_means = np.nanmean(ref_hyper, axis=1)
+        hyper_stds = np.nanstd(ref_hyper, axis=1, ddof=0)
+    del ref_hypo, ref_hyper
+
     hypo_means = np.where(np.isfinite(hypo_means), hypo_means, 0.0)
     hyper_means = np.where(np.isfinite(hyper_means), hyper_means, 0.0)
-    return hypo_means, hypo_stds, hyper_means, hyper_stds
+    hypo_std_safe = np.where(hypo_stds > 0, hypo_stds, np.nan)
+    hyper_std_safe = np.where(hyper_stds > 0, hyper_stds, np.nan)
 
-
-def _s_inter_block(
-    hypo_z_intra: np.ndarray,
-    hyper_z_intra: np.ndarray,
-    hypo_counts: np.ndarray,
-    hyper_counts: np.ndarray,
-    hypo_means: np.ndarray,
-    hypo_stds: np.ndarray,
-    hyper_means: np.ndarray,
-    hyper_stds: np.ndarray,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Vectorized version of ``calculate_s_inter_from_stats`` over all samples.
-
-    Inputs are ``(n_samples, n_chr)``. Means/stds are ``(n_chr,)``.
-    """
-    with np.errstate(divide="ignore", invalid="ignore"):
-        hypo_std_safe = np.where(hypo_stds > 0, hypo_stds, np.nan)
-        hyper_std_safe = np.where(hyper_stds > 0, hyper_stds, np.nan)
-        hypo_z_inter = (hypo_z_intra - hypo_means) / hypo_std_safe
-        hyper_z_inter = (hyper_z_intra - hyper_means) / hyper_std_safe
-
-    w_hypo = np.sqrt(hypo_counts.astype(np.float64))
-    w_hyper = np.sqrt(hyper_counts.astype(np.float64))
-    total_w = np.sqrt(w_hypo ** 2 + w_hyper ** 2)
+    eval_hypo_z_b = eval_hypo_z[None, :, :]    # (1, E, C)
+    eval_hyper_z_b = eval_hyper_z[None, :, :]
+    hypo_means_b = hypo_means[:, None, :]      # (B, 1, C)
+    hyper_means_b = hyper_means[:, None, :]
+    hypo_std_b = hypo_std_safe[:, None, :]
+    hyper_std_b = hyper_std_safe[:, None, :]
 
     with np.errstate(divide="ignore", invalid="ignore"):
-        s_inter = (hyper_z_inter * w_hyper - hypo_z_inter * w_hypo) / total_w
-    s_inter = np.where(np.isnan(s_inter), 0.0, s_inter)
-    return hypo_z_inter, hyper_z_inter, s_inter
+        hypo_z_inter = (eval_hypo_z_b - hypo_means_b) / hypo_std_b   # (B, E, C)
+        hyper_z_inter = (eval_hyper_z_b - hyper_means_b) / hyper_std_b
+        s_inter = (hyper_z_inter * eval_w_hyper - hypo_z_inter * eval_w_hypo) / eval_total_w
+    del hypo_z_inter, hyper_z_inter
+    s_inter = np.where(np.isnan(s_inter), 0.0, s_inter)             # (B, E, C)
 
-
-# ---------------------------------------------------------------------------
-# Output construction
-# ---------------------------------------------------------------------------
-
-def _build_output_df(
-    samples: List[str],
-    chr_list: List[str],
-    hypo_beta: np.ndarray,
-    hyper_beta: np.ndarray,
-    hypo_z_intra: np.ndarray,
-    hyper_z_intra: np.ndarray,
-    s_intra: np.ndarray,
-    hypo_counts: np.ndarray,
-    hyper_counts: np.ndarray,
-    inter: Optional[Dict[str, np.ndarray]] = None,
-) -> pd.DataFrame:
-    """Build a wide DataFrame matching ``beta_to_zscore.py``'s schema."""
-    data: Dict[str, np.ndarray] = {"sample": np.asarray(samples, dtype=object)}
-    for j, chr_name in enumerate(chr_list):
-        data[f"{chr_name}_hypo_beta"] = hypo_beta[:, j]
-        data[f"{chr_name}_hyper_beta"] = hyper_beta[:, j]
-        data[f"{chr_name}_hypo_z_intra"] = hypo_z_intra[:, j]
-        data[f"{chr_name}_hyper_z_intra"] = hyper_z_intra[:, j]
-        data[f"{chr_name}_s_intra"] = s_intra[:, j]
-        data[f"{chr_name}_hypo_cpgs_count"] = hypo_counts[:, j]
-        data[f"{chr_name}_hyper_cpgs_count"] = hyper_counts[:, j]
-        if inter is not None:
-            data[f"{chr_name}_hypo_z_inter"] = inter["hypo_z_inter"][:, j]
-            data[f"{chr_name}_hyper_z_inter"] = inter["hyper_z_inter"][:, j]
-            data[f"{chr_name}_s_inter"] = inter["s_inter"][:, j]
-    return pd.DataFrame(data)
-
-
-# ---------------------------------------------------------------------------
-# MCC
-# ---------------------------------------------------------------------------
-
-def _classify(
-    s_inter: np.ndarray,
-    labels: np.ndarray,
-    cutoff: float,
-) -> Tuple[int, int, int, int]:
-    """Return ``(TP, TN, FP, FN)`` over the rows of ``s_inter``.
-
-    ``labels`` is a 1-D string array aligned to ``s_inter``'s rows.
-    Rows whose label is missing or not in {"Normal", "T*"} are skipped.
-    """
     with np.errstate(invalid="ignore"):
-        any_pos = np.nanmax(s_inter, axis=1) > cutoff
-    any_pos = np.where(np.isnan(any_pos), False, any_pos).astype(bool)
+        s_inter_max = np.max(s_inter, axis=2)                       # (B, E)
+    del s_inter
+    any_pos = s_inter_max > s_inter_cutoff                          # (B, E) bool
 
-    is_normal = labels == "Normal"
-    is_trisomy = np.array(
-        [isinstance(l, str) and l.startswith("T") and l != "Normal" for l in labels],
-        dtype=bool,
+    is_normal_b = eval_is_normal[None, :]
+    is_trisomy_b = eval_is_trisomy[None, :]
+    tp = np.sum(any_pos & is_trisomy_b, axis=1).astype(np.int64)
+    fn = np.sum((~any_pos) & is_trisomy_b, axis=1).astype(np.int64)
+    fp = np.sum(any_pos & is_normal_b, axis=1).astype(np.int64)
+    tn = np.sum((~any_pos) & is_normal_b, axis=1).astype(np.int64)
+
+    num = tp.astype(np.float64) * tn - fp.astype(np.float64) * fn
+    denom_sq = (
+        (tp + fp).astype(np.float64)
+        * (tp + fn)
+        * (tn + fp)
+        * (tn + fn)
     )
-
-    tp = int(np.sum(is_trisomy & any_pos))
-    fn = int(np.sum(is_trisomy & ~any_pos))
-    fp = int(np.sum(is_normal & any_pos))
-    tn = int(np.sum(is_normal & ~any_pos))
-    return tp, tn, fp, fn
-
-
-def _mcc(tp: int, tn: int, fp: int, fn: int) -> float:
-    num = tp * tn - fp * fn
-    denom_sq = (tp + fp) * (tp + fn) * (tn + fp) * (tn + fn)
-    if denom_sq == 0:
-        return float("nan")
-    return num / math.sqrt(denom_sq)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mcc = np.where(denom_sq > 0, num / np.sqrt(denom_sq), np.nan)
+    return tp, tn, fp, fn, mcc
 
 
 # ---------------------------------------------------------------------------
@@ -364,15 +343,19 @@ def _mcc(tp: int, tn: int, fp: int, fn: int) -> float:
 )
 @click.option(
     "--runs",
-    default=10,
+    default=10000,
     type=int,
-    help="Number of random draws per N (default 10). N == pool_size always uses 1.",
+    help=(
+        "Number of unique random combinations per N (default 10000). "
+        "If C(pool_size, N) <= runs the full set of combinations is "
+        "enumerated, so N == pool_size always yields exactly one run."
+    ),
 )
 @click.option(
     "--seed",
     default=42,
     type=int,
-    help="Base seed; per-run seed is ``seed * 100000 + N * 100 + run_index``.",
+    help="Master RNG seed used to draw the unique combinations.",
 )
 @click.option(
     "--s-inter-cutoff",
@@ -381,16 +364,22 @@ def _mcc(tp: int, tn: int, fp: int, fn: int) -> float:
     help="s_inter cutoff used for the TP/TN/FP/FN classification (default 3.0).",
 )
 @click.option(
-    "--no-write-tsv",
-    is_flag=True,
-    default=False,
-    help="Skip writing per-run _analyze/_reference TSVs (only emit report.csv).",
+    "--threads",
+    default=None,
+    type=int,
+    help=(
+        "Worker threads for batched run evaluation. Defaults to "
+        "$SLURM_CPUS_PER_TASK if set, otherwise os.cpu_count()."
+    ),
 )
 @click.option(
-    "--no-gzip",
-    is_flag=True,
-    default=False,
-    help="Write per-run outputs as plain TSV instead of TSV.gz.",
+    "--batch-size",
+    default=100,
+    type=int,
+    help=(
+        "Number of runs per vectorized batch (default 100). Larger values "
+        "amortize threading overhead at the cost of peak memory."
+    ),
 )
 def main(
     combo_dir: str,
@@ -404,24 +393,26 @@ def main(
     runs: int,
     seed: int,
     s_inter_cutoff: float,
-    no_write_tsv: bool,
-    no_gzip: bool,
+    threads: Optional[int],
+    batch_size: int,
 ) -> None:
     """Sweep over reference sizes ``N`` and report MCC for each random draw.
 
     \b
     1. Concat ``_reference_zscore.tsv.gz`` + ``_analyze_zscore.tsv.gz`` from
-       --combo-dir (the fixed (threshold, recall) directory).
-    2. Join with --meta-csv to attach label / ref_type / set.
-    3. For ``N`` in [n_min, n_min+n_step, ..., n_max] and
-       ``run_index`` in [0, runs):
-         - randomly pick N samples from {set==dev, label==Normal} as the new
-           reference;
-         - recompute reference per-chr stats and analyze ``s_inter``;
-         - write ref_n_{N}_run_{run_index}/_reference_zscore.tsv.gz and
-           _analyze_zscore.tsv.gz (unless --no-write-tsv);
-         - record TP/TN/FP/FN/MCC over all non-reference samples.
-    4. Write report.csv under --output-base/<output-subdir>/.
+       --combo-dir (the fixed (threshold, recall) directory) keeping only
+       the z_intra and CpG-count columns needed downstream.
+    2. Join with --meta-csv to attach label / set.
+    3. Define
+         pool : (set == dev) AND (label == Normal)            -> candidates
+         eval : NOT pool (i.e. test set + dev non-Normal)     -> fixed eval set
+    4. For ``N`` in [n_min, n_min+n_step, ..., n_max], generate up to
+       ``--runs`` *unique* sub-sets of size N from the pool; for each:
+         - recompute reference per-chr stats from the chosen N samples;
+         - recompute s_inter for the fixed eval set;
+         - record TP/TN/FP/FN/MCC.
+    5. Write report.csv under --output-base/<output-subdir>/. No per-run
+       TSVs are produced.
     """
     console.rule("[bold blue]Enlarged-reference Z-score recomputation")
 
@@ -432,36 +423,41 @@ def main(
     combo_dir_path = Path(combo_dir)
     chr_list = _parse_chr_spec(chr_spec)
 
+    if threads is None or threads <= 0:
+        threads = int(os.environ.get("SLURM_CPUS_PER_TASK", "0") or 0) or (os.cpu_count() or 1)
+    batch_size = max(1, int(batch_size))
+
     console.print("\n[bold]Input parameters[/bold]")
     console.print(f"  Combo dir       : {combo_dir_path}")
     console.print(f"  Meta CSV        : {meta_csv}")
     console.print(f"  Output dir      : {out_dir}")
     console.print(f"  Chromosomes     : {len(chr_list)}  ({chr_list[0]}..{chr_list[-1]})")
     console.print(f"  N range         : [{n_min}, {n_max if n_max else 'pool_size'}] step {n_step}")
-    console.print(f"  Runs per N      : {runs}")
-    console.print(f"  Seed (base)     : {seed}")
+    console.print(f"  Runs per N      : up to {runs} (capped by C(pool, N))")
+    console.print(f"  Seed            : {seed}")
     console.print(f"  s_inter cutoff  : {s_inter_cutoff}")
-    console.print(f"  Write per-run TSVs: {not no_write_tsv}")
+    console.print(f"  Threads         : {threads}")
+    console.print(f"  Batch size      : {batch_size}")
 
     try:
         # --------------------------------------------------------------
-        # Step 1: load combo TSVs
+        # Step 1: load combo TSVs (only needed columns)
         # --------------------------------------------------------------
         console.print("\n[bold cyan]Step 1: Loading combo TSVs[/bold cyan]")
         samples, arrays = _load_combined(combo_dir_path, chr_list)
         n_samples = len(samples)
         console.print(
             f"[green]OK[/green] Loaded {n_samples} samples x {len(chr_list)} chrs "
-            f"(reference + analyze concatenated)"
+            f"(reference + analyze concatenated, kept only z_intra & CpG counts)"
         )
 
         # --------------------------------------------------------------
-        # Step 2: meta + reference candidate pool
+        # Step 2: meta join + build pool / fixed eval set
         # --------------------------------------------------------------
-        console.print("\n[bold cyan]Step 2: Joining meta and building ref pool[/bold cyan]")
+        console.print("\n[bold cyan]Step 2: Joining meta and partitioning samples[/bold cyan]")
         meta = _load_meta(meta_csv, samples)
-        labels = meta["label"].astype("string").to_numpy()
-        sets = meta["set"].astype("string").to_numpy()
+        labels = meta["label"].fillna("").astype(str).to_numpy()
+        sets = meta["set"].fillna("").astype(str).to_numpy()
 
         pool_mask = (sets == "dev") & (labels == "Normal")
         pool_indices = np.flatnonzero(pool_mask)
@@ -475,6 +471,26 @@ def main(
                 f"Reference pool ({pool_size}) is smaller than --n-min ({n_min})."
             )
 
+        eval_mask = ~pool_mask
+        eval_indices = np.flatnonzero(eval_mask)
+        eval_labels = labels[eval_indices]
+        eval_is_normal = (eval_labels == "Normal")
+        eval_is_trisomy = np.array(
+            [
+                isinstance(l, str) and l.startswith("T") and l != "Normal"
+                for l in eval_labels
+            ],
+            dtype=bool,
+        )
+        n_eval = int(eval_indices.size)
+        n_eval_pos = int(eval_is_trisomy.sum())
+        n_eval_neg = int(eval_is_normal.sum())
+        console.print(
+            f"[green]OK[/green] Fixed eval set (test set + dev non-Normal): "
+            f"{n_eval} samples ({n_eval_pos} positive / {n_eval_neg} negative, "
+            f"{n_eval - n_eval_pos - n_eval_neg} ignored)"
+        )
+
         if n_max is None:
             n_max = pool_size
         n_max = min(int(n_max), pool_size)
@@ -482,28 +498,44 @@ def main(
             raise ValueError(f"--n-max ({n_max}) is smaller than --n-min ({n_min}).")
 
         n_values = list(range(n_min, n_max + 1, max(1, n_step)))
-        if n_values[-1] != n_max:
+        if n_values and n_values[-1] != n_max:
             n_values.append(n_max)
-        console.print(f"  N values        : {n_values}")
-
-        # Pre-extract arrays we'll reuse hot.
-        hypo_z_intra = arrays["hypo_z_intra"]
-        hyper_z_intra = arrays["hyper_z_intra"]
-        hypo_counts = arrays["hypo_counts"]
-        hyper_counts = arrays["hyper_counts"]
-        hypo_beta = arrays["hypo_beta"]
-        hyper_beta = arrays["hyper_beta"]
-        s_intra = arrays["s_intra"]
-
-        suffix = ".tsv" if no_gzip else ".tsv.gz"
+        console.print(f"  N values        : {n_values[0]}..{n_values[-1]} ({len(n_values)} values)")
 
         # --------------------------------------------------------------
-        # Step 3: sweep over N and runs
+        # Pre-slice arrays into pool and eval views (much smaller)
         # --------------------------------------------------------------
-        total_runs = sum(1 if N == pool_size else runs for N in n_values)
+        pool_hypo_z = np.ascontiguousarray(arrays["hypo_z_intra"][pool_indices])
+        pool_hyper_z = np.ascontiguousarray(arrays["hyper_z_intra"][pool_indices])
+        eval_hypo_z = np.ascontiguousarray(arrays["hypo_z_intra"][eval_indices])
+        eval_hyper_z = np.ascontiguousarray(arrays["hyper_z_intra"][eval_indices])
+        eval_hypo_counts = arrays["hypo_counts"][eval_indices].astype(np.float64)
+        eval_hyper_counts = arrays["hyper_counts"][eval_indices].astype(np.float64)
+        # Drop the full-sample arrays; everything from here on uses the sliced views.
+        del arrays
+
+        eval_w_hypo = np.sqrt(eval_hypo_counts)
+        eval_w_hyper = np.sqrt(eval_hyper_counts)
+        eval_total_w = np.sqrt(eval_w_hypo ** 2 + eval_w_hyper ** 2)
+        eval_total_w = np.where(eval_total_w > 0, eval_total_w, np.nan)
+        del eval_hypo_counts, eval_hyper_counts
+
+        # --------------------------------------------------------------
+        # Step 3: plan runs and dispatch in vectorized batches across threads
+        # --------------------------------------------------------------
+        rng = np.random.default_rng(seed)
+
+        # Plan the per-N run counts so we can show one global progress bar.
+        per_n_run_count: Dict[int, int] = {}
+        for N in n_values:
+            total_combos = math.comb(int(pool_size), int(N))
+            per_n_run_count[N] = int(min(runs, total_combos))
+        total_runs = sum(per_n_run_count.values())
+
         console.print(
             f"\n[bold cyan]Step 3: Recomputing s_inter across "
-            f"{len(n_values)} N values, {total_runs} total runs[/bold cyan]"
+            f"{len(n_values)} N values, {total_runs} total runs "
+            f"(threads={threads}, batch={batch_size})[/bold cyan]"
         )
 
         report_rows: List[Dict[str, float]] = []
@@ -518,91 +550,69 @@ def main(
 
         with Progress(*progress_columns, console=console) as progress:
             task = progress.add_task("Runs", total=total_runs)
+
             for N in n_values:
-                this_runs = 1 if N == pool_size else runs
-                for run_index in range(this_runs):
-                    rng = np.random.default_rng(seed * 100000 + N * 100 + run_index)
-                    chosen = np.sort(rng.choice(pool_indices, size=N, replace=False))
+                combos = _generate_unique_combos(pool_size, N, runs, rng)
+                if not combos:
+                    continue
 
-                    is_ref = np.zeros(n_samples, dtype=bool)
-                    is_ref[chosen] = True
-                    analyze_idx = np.flatnonzero(~is_ref)
+                # Stack combos for this N into a contiguous (R, N) array.
+                chosen_full = np.stack(combos, axis=0)
+                n_runs_this_N = chosen_full.shape[0]
 
-                    hypo_means, hypo_stds, hyper_means, hyper_stds = _reference_stats(
-                        hypo_z_intra[chosen], hyper_z_intra[chosen],
-                    )
+                # Build batch slices.
+                batches: List[Tuple[int, int]] = []
+                for start in range(0, n_runs_this_N, batch_size):
+                    end = min(start + batch_size, n_runs_this_N)
+                    batches.append((start, end))
 
-                    a_hypo_z_inter, a_hyper_z_inter, a_s_inter = _s_inter_block(
-                        hypo_z_intra[analyze_idx], hyper_z_intra[analyze_idx],
-                        hypo_counts[analyze_idx], hyper_counts[analyze_idx],
-                        hypo_means, hypo_stds, hyper_means, hyper_stds,
-                    )
-
-                    if not no_write_tsv:
-                        run_dir = out_dir / f"ref_n_{N}_run_{run_index}"
-                        run_dir.mkdir(parents=True, exist_ok=True)
-
-                        # Sort by sample for deterministic ordering.
-                        ref_order = np.argsort([samples[i] for i in chosen])
-                        an_order = np.argsort([samples[i] for i in analyze_idx])
-
-                        ref_samples_sorted = [samples[chosen[i]] for i in ref_order]
-                        an_samples_sorted = [samples[analyze_idx[i]] for i in an_order]
-
-                        ref_df = _build_output_df(
-                            ref_samples_sorted,
-                            chr_list,
-                            hypo_beta[chosen][ref_order],
-                            hyper_beta[chosen][ref_order],
-                            hypo_z_intra[chosen][ref_order],
-                            hyper_z_intra[chosen][ref_order],
-                            s_intra[chosen][ref_order],
-                            hypo_counts[chosen][ref_order],
-                            hyper_counts[chosen][ref_order],
-                            inter=None,
+                with ThreadPoolExecutor(max_workers=threads) as ex:
+                    fut_to_range = {}
+                    for (start, end) in batches:
+                        fut = ex.submit(
+                            _evaluate_batch,
+                            chosen_full[start:end],
+                            pool_hypo_z,
+                            pool_hyper_z,
+                            eval_hypo_z,
+                            eval_hyper_z,
+                            eval_w_hypo,
+                            eval_w_hyper,
+                            eval_total_w,
+                            eval_is_normal,
+                            eval_is_trisomy,
+                            s_inter_cutoff,
                         )
-                        an_df = _build_output_df(
-                            an_samples_sorted,
-                            chr_list,
-                            hypo_beta[analyze_idx][an_order],
-                            hyper_beta[analyze_idx][an_order],
-                            hypo_z_intra[analyze_idx][an_order],
-                            hyper_z_intra[analyze_idx][an_order],
-                            s_intra[analyze_idx][an_order],
-                            hypo_counts[analyze_idx][an_order],
-                            hyper_counts[analyze_idx][an_order],
-                            inter={
-                                "hypo_z_inter": a_hypo_z_inter[an_order],
-                                "hyper_z_inter": a_hyper_z_inter[an_order],
-                                "s_inter": a_s_inter[an_order],
-                            },
-                        )
-                        _write_tsv(ref_df, str(run_dir / f"_reference_zscore{suffix}"))
-                        _write_tsv(an_df, str(run_dir / f"_analyze_zscore{suffix}"))
+                        fut_to_range[fut] = (start, end)
 
-                    tp, tn, fp, fn = _classify(
-                        a_s_inter, labels[analyze_idx], s_inter_cutoff,
-                    )
-                    mcc = _mcc(tp, tn, fp, fn)
-                    report_rows.append(
-                        {
-                            "ref_n": N,
-                            "run_index": run_index,
-                            "MCC": mcc,
-                            "TP": tp,
-                            "TN": tn,
-                            "FP": fp,
-                            "FN": fn,
-                        }
-                    )
-                    progress.advance(task)
+                    for fut in as_completed(fut_to_range):
+                        start, end = fut_to_range[fut]
+                        tp, tn, fp, fn, mcc = fut.result()
+                        for i, run_index in enumerate(range(start, end)):
+                            report_rows.append(
+                                {
+                                    "ref_n": int(N),
+                                    "run_index": int(run_index),
+                                    "MCC": float(mcc[i]),
+                                    "TP": int(tp[i]),
+                                    "TN": int(tn[i]),
+                                    "FP": int(fp[i]),
+                                    "FN": int(fn[i]),
+                                }
+                            )
+                        progress.advance(task, advance=(end - start))
+
+                # Release combos for this N before moving on.
+                del combos, chosen_full
 
         # --------------------------------------------------------------
-        # Step 4: report
+        # Step 4: write report
         # --------------------------------------------------------------
         report_df = pd.DataFrame(
-            report_rows, columns=["ref_n", "run_index", "MCC", "TP", "TN", "FP", "FN"],
+            report_rows,
+            columns=["ref_n", "run_index", "MCC", "TP", "TN", "FP", "FN"],
         )
+        report_df = report_df.sort_values(["ref_n", "run_index"]).reset_index(drop=True)
         report_path = out_dir / "report.csv"
         report_df.to_csv(report_path, index=False, float_format="%.6f")
         console.print(

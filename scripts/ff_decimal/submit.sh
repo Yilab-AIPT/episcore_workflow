@@ -6,6 +6,7 @@
 #     HCPT0121,/lustre1/.../HCPT0121P_pileup.tsv.gz
 #     ...
 # and submits one job per row using run_estimate_ff.slurm.
+# Skips a sample when OUTPUT_DIR/<sample>_ff.tsv already exists.
 #
 # To avoid swamping the scheduler we throttle submissions in two ways:
 #   (a) wait until our queued/running jobs are < MAX_JOBS before submitting
@@ -17,7 +18,7 @@
 set -euo pipefail
 
 SAMPLESHEET=/lustre1/cqyi/syfan/nipt_article_plot/snp_pileup_result_samplesheet.csv
-OUTPUT_DIR=/lustre1/cqyi/syfan/nipt_article_plot/dev_and_test_ff
+OUTPUT_DIR=/lustre1/cqyi/syfan/nipt_article_plot/ff_higher_precision
 
 DRY_RUN=${DRY_RUN:-0}
 for arg in "$@"; do
@@ -130,7 +131,7 @@ while IFS=, read -r -a fields; do
     job_name="${JOB_PREFIX}${sample}"
 
     if [ "$DRY_RUN" = 1 ]; then
-        echo "[DRY-RUN] sbatch --parsable --job-name=${job_name} ${SLURM_SCRIPT} ${sample} ${pileup}"
+        echo "[DRY-RUN] sbatch --parsable --job-name=${job_name} ${SLURM_SCRIPT} ${sample} ${pileup} ${OUTPUT_DIR}"
         n_submitted=$((n_submitted + 1))
         continue
     fi
@@ -138,7 +139,7 @@ while IFS=, read -r -a fields; do
     wait_for_slot
     jobid=$(sbatch --parsable \
         --job-name="$job_name" \
-        "$SLURM_SCRIPT" "$sample" "$pileup")
+        "$SLURM_SCRIPT" "$sample" "$pileup" "$OUTPUT_DIR")
     echo "Submitted ${sample}  job_id=${jobid}  log=logs/${job_name}.log"
     n_submitted=$((n_submitted + 1))
 

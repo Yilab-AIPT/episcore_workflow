@@ -3,9 +3,11 @@
 #
 # That python script reads the fixed (threshold, recall) combo's
 # _analyze_zscore.tsv.gz and _reference_zscore.tsv.gz, joins with --meta-csv,
-# and for each enlarged-reference size N (10..pool_size, with --runs random
-# draws per N) recomputes per-sample s_inter and reports a per-run MCC under
-# <output_base>/<output_subdir>/ (default subdir: enlarged_reference).
+# and for each enlarged-reference size N (10..pool_size, with up to --runs
+# unique random sub-sets per N, default 10000) recomputes s_inter for a
+# *fixed* evaluation set (test set + dev non-Normal) and reports per-run MCC
+# in <output_base>/<output_subdir>/report.csv (default subdir:
+# enlarged_reference). No per-run TSVs are written.
 #
 # Usage:
 #     ./submit_for_enlarged_ref.sh [-n|--dry-run] \
@@ -31,7 +33,7 @@ OUTPUT_SUBDIR="enlarged_reference"
 DRY_RUN=${DRY_RUN:-0}
 
 usage() {
-    sed -n '2,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 while [ $# -gt 0 ]; do
