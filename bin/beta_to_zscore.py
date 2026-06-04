@@ -20,6 +20,25 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeEl
 console = Console()
 
 
+def parse_chr_list(spec: str) -> List[str]:
+    """Parse a chromosome spec like '1-22', '1,2,X,Y', or mixed spec like '1-22,X'."""
+    spec = spec.strip()
+    tokens = [s.strip() for s in spec.split(",") if s.strip()]
+    result = []
+    for token in tokens:
+        if "-" in token and not token.startswith("chr"):
+            try:
+                start, end = token.split("-")
+                start_int = int(start)
+                end_int = int(end)
+                result.extend([f"chr{i}" for i in range(start_int, end_int + 1)])
+            except ValueError:
+                result.append(token if token.startswith("chr") else f"chr{token}")
+        else:
+            result.append(token if token.startswith("chr") else f"chr{token}")
+    return result
+
+
 def read_beta(
     beta_path: str,
     usecols: List[str],
@@ -399,7 +418,7 @@ def build_output_dataframe(
     '--chr-list',
     default='1-22',
     type=str,
-    help='Chromosomes to analyze (e.g., "1-22" or "1,2,3,X,Y")'
+    help='Chromosomes to analyze (e.g., "1-22", "1,2,3,X,Y", or "1-22,X")'
 )
 @click.option(
     '--beta-cols',
@@ -477,12 +496,7 @@ def main(
     output = f"{output_prefix}_zscore.tsv"
     try:
         # Parse chromosome list
-        if '-' in chr_list:
-            start, end = chr_list.split('-')
-            chromosomes = [f'chr{i}' for i in range(int(start), int(end) + 1)]
-        else:
-            chromosomes = [f'chr{c}' if not c.startswith('chr') else c 
-                          for c in chr_list.split(',')]
+        chromosomes = parse_chr_list(chr_list)
         
         console.print(f"  Analyzing {len(chromosomes)} chromosomes")
         

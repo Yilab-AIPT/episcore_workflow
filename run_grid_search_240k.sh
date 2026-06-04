@@ -6,14 +6,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DRY_RUN="${DRY_RUN:-false}"
 
 NF_MAIN="/lustre1/cqyi/AIPT_2.0/workflow/episcore/main.nf"
-SAMPLESHEET="/lustre1/cqyi/AIPT_2.0/data/meta/episcore/20260508-grid_search/samplesheet.csv"
-RESULTS_BASE="/lustre1/cqyi/AIPT_2.0/results/episcore_output/20260508-grid_search"
+SAMPLESHEET="/lustre1/cqyi/AIPT_2.0/data/meta/episcore/20260525-grid_search_240k_panel_240k_model/samplesheet.csv"
+RESULTS_BASE="/lustre1/cqyi/AIPT_2.0/results/episcore_output/20260525-grid_search_240k_panel_240k_model"
 
 LOG_DIR="${RESULTS_BASE}/logs"
 TIMESTAMP="$(date '+%Y%m%d_%H%M%S')"
 LOG_FILE="${LOG_DIR}/grid_search_${TIMESTAMP}.log"
 
-THRESHOLDS=(0.1 0.33 0.5 0.67 0.9)
+# THRESHOLDS=(0.1 0.33 0.5 0.67 0.9)
+THRESHOLDS=(0.9)
+CPG_LIST="/lustre1/cqyi/AIPT_2.0/workflow/episcore/assets/cpgs_in_240k_probes.txt"
 
 mkdir -p "$LOG_DIR"
 
@@ -45,6 +47,7 @@ for threshold in "${THRESHOLDS[@]}"; do
         --input "$SAMPLESHEET"
         --outdir "$outdir"
         --threshold "$threshold"
+        --cpg_list "$CPG_LIST"
     )
 
     if [[ "$DRY_RUN" == "true" ]]; then

@@ -7,27 +7,25 @@
 
 # Sweep over enlarged reference sizes and report per-run MCC.
 #
-# For each N from --n-min (default 10) up to the size of the dev+Normal pool,
-# up to --runs *unique* random sub-sets of N reference candidates are drawn
-# (default 10000 per N). For every draw the script:
-#   1. recomputes per-chromosome reference statistics from the chosen N
-#      samples;
-#   2. recomputes s_inter for a *fixed* evaluation set (test set + dev samples
-#      with a non-Normal label) using the new reference statistics;
-#   3. records TP/TN/FP/FN/MCC in report.csv.
-#
-# No per-run _reference_zscore.tsv.gz / _analyze_zscore.tsv.gz are produced;
-# only <output_base>/<output_subdir>/report.csv is written.
+# Modes (--mode, passed through to b2z_for_enlarged_ref.py):
+#   all (default)
+#       For each N from --n-min up to the dev+Normal pool size, up to --runs
+#       unique random reference sub-sets; single MCC on test + dev non-Normal.
+#   isolated
+#       100 random 50-sample reference pools from dev Normal; per pool, 50
+#       unique reference draws per N in [5, 45]; separate MCC_dev and MCC_test.
+#       Also writes top_100_reference_list.csv for N in [35, 45].
 #
 # Usage:
 #     sbatch run_b2z_for_enlarged_ref.slurm \
-#            [<combo_dir>] [<meta_csv>] [<output_base>] [<output_subdir>]
+#            [<combo_dir>] [<meta_csv>] [<output_dir>] [<mode>]
 #
 # Defaults match the 20260508-grid_search run:
-#     combo_dir      : <RESULT_BASE>/output/threshold_0.5_recall_0.65
-#     meta_csv       : /lustre1/cqyi/AIPT_2.0/data/meta/episcore/20260508-grid_search/meta.csv
-#     output_base    : <RESULT_BASE>/output
-#     output_subdir  : enlarged_reference
+#     combo_dir   : <RESULT_BASE>/output/threshold_0.5_recall_0.65
+#     meta_csv    : /lustre1/cqyi/AIPT_2.0/data/meta/episcore/20260508-grid_search/meta.csv
+#     output_dir  : <RESULT_BASE>/output/enlarged_reference  (all mode)
+#                   <RESULT_BASE>/output/enlarged_reference_isolated  (isolated)
+#     mode        : all
 
 set -euo pipefail
 
@@ -36,8 +34,20 @@ META_CSV_DEFAULT=/lustre1/cqyi/AIPT_2.0/data/meta/episcore/20260508-grid_search/
 
 COMBO_DIR=${1:-"${RESULT_BASE}/output/threshold_0.5_recall_0.65"}
 META_CSV=${2:-"$META_CSV_DEFAULT"}
-OUTPUT_BASE=${3:-"${RESULT_BASE}"}
-OUTPUT_SUBDIR=${4:-"enlarged_reference"}
+MODE=${4:-all}
+
+case "$MODE" in
+    all)
+        OUTPUT_DIR=${3:-"${RESULT_BASE}/output/enlarged_reference"}
+        ;;
+    isolated)
+        OUTPUT_DIR=${3:-"${RESULT_BASE}/output/enlarged_reference_isolated"}
+        ;;
+    *)
+        echo "ERROR: mode must be 'all' or 'isolated', got: $MODE" >&2
+        exit 1
+        ;;
+esac
 
 # Run from the directory containing b2z_for_enlarged_ref.py (where sbatch was called).
 SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
@@ -53,7 +63,7 @@ if [ ! -f "$META_CSV" ]; then
     echo "ERROR: meta CSV not found: $META_CSV" >&2
     exit 1
 fi
-mkdir -p "$OUTPUT_BASE"
+mkdir -p "$(dirname "$OUTPUT_DIR")"
 
 THREADS=${SLURM_CPUS_PER_TASK:-8}
 
@@ -68,18 +78,17 @@ export NUMEXPR_NUM_THREADS=1
 echo "[$(date)] Starting b2z_for_enlarged_ref on host $(hostname)"
 echo "  combo dir      : $COMBO_DIR"
 echo "  meta csv       : $META_CSV"
-echo "  output base    : $OUTPUT_BASE"
-echo "  output subdir  : $OUTPUT_SUBDIR"
-echo "  output dir     : $OUTPUT_BASE/$OUTPUT_SUBDIR"
+echo "  output dir     : $OUTPUT_DIR"
+echo "  mode           : $MODE"
 echo "  cpus / threads : ${THREADS}"
 
 singularity exec -B /lustre1,/lustre2,/appsnew \
     /lustre1/cqyi/syfan/images/common_tools.sif \
     python3 b2z_for_enlarged_ref.py \
-        --combo-dir     "$COMBO_DIR" \
-        --meta-csv      "$META_CSV" \
-        --output-base   "$OUTPUT_BASE" \
-        --output-subdir "$OUTPUT_SUBDIR" \
-        --threads       "$THREADS"
+        --combo-dir   "$COMBO_DIR" \
+        --meta-csv    "$META_CSV" \
+        --output-dir  "$OUTPUT_DIR" \
+        --mode        "$MODE" \
+        --threads     "$THREADS"
 
 echo "[$(date)] Finished b2z_for_enlarged_ref"
