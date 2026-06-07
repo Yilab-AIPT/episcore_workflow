@@ -1,0 +1,53 @@
+---
+description: Nextflow conventions for episcore pipeline
+globs: "**/*.nf"
+alwaysApply: false
+---
+
+# Nextflow (episcore)
+
+## Layout
+
+- **Router**: `main.nf` — `workflow MAIN` (NIPT) / `SUB` (grid search) / `EST_FF` (SNP FF); gate on `params.step`
+- **Workflows**: `workflows/*.nf` orchestrate subworkflows only (`nipt.nf`, `grid_search.nf`, `snp_est_ff.nf`)
+- **Subworkflows**: `subworkflows/local/*.nf` — channel wiring, `branch`/`groupTuple` for multi-file samples
+- **Processes**: `modules/local/<tool>/main.nf` or aliased nf-core includes
+
+## Patterns to follow
+
+```groovy
+// Samplesheet → channel (lib/samplesheet_parser.nf)
+def meta = [id: row.sample]
+return [ meta, file(row.clean_bam, checkIfExists: true), ... ]
+
+// Process I/O
+process BETA_TO_ZSCORE {
+    tag "$meta.id"
+    input:
+    tuple val(meta), path(beta_value)
+    output:
+    tuple val(meta), path("*_zscore.tsv"), emit: zscore
+    script:
+    def ref_matrix_arg = reference_beta_zscore_matrix?.name != 'null' ? "--reference-beta-zscore-matrix ${reference_beta_zscore_matrix}" : ""
+    """
+    beta_to_zscore.py --beta-value ${beta_value} --output-prefix ${meta.id} ...
+    """
+}
+```
+
+- Alias duplicate modules: `SAMTOOLS_INDEX as SAMTOOLS_INDEX_TARGET`
+- Optional params: empty list `[]` or conditional `file(params.meta)` before passing to processes
+- `nipt.nf` resumes from `split_bam` output via `collectFile` samplesheet under `${params.outdir}/samplesheet/`
+
+## Adding a process
+
+1. Script in `bin/<name>.py` (CLI with click)
+2. `modules/local/<name>/main.nf` calling script by basename
+3. Register container/resources in `conf/alioth_slurm.config` (and `grid_search.config` if used in grid search)
+4. Wire in appropriate `subworkflows/local/*.nf`
+
+## Channel pitfalls
+
+- Join on meta: `join(..., by: 0)` — first element is `meta` map
+- `groupTuple` + `branch` pattern for multiple BAMs/deconv files per sample (see `split_bam.nf`)
+- Do not break emit names consumed upstream (`splitted_bam`, `zscore`, `beta_value`, etc.)

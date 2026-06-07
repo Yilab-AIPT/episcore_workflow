@@ -1,0 +1,47 @@
+---
+description: Python CLI scripts for Nextflow processes
+globs: "bin/**/*.py,scripts/**/*.py"
+alwaysApply: false
+---
+
+# Python (episcore)
+
+## Role
+
+`bin/*.py` run inside Nextflow processes (Singularity `common_tools.sif` etc.). `scripts/**/*.py` are offline batch analysis — may duplicate logic; prefer fixing `bin/` and syncing copies only if user requests.
+
+## Stack
+
+- **CLI**: `click` with `@click.command()` / `@click.option`
+- **UX**: `rich.console.Console` for errors and progress
+- **Tables**: `pandas` (beta, FF, reports); `polars` for large deconv merge/filter (`merge_deconv_res.py`, `filter_deconv_res.py`)
+- **Genomics**: `pysam` in `bam_to_pileup.py`; `FFEstimator` class in `FFEstimator.py`
+
+## Conventions
+
+```python
+#!/usr/bin/env python3
+"""Module docstring: purpose and inputs/outputs."""
+
+from pathlib import Path
+import click
+from rich.console import Console
+
+console = Console()
+
+@click.command()
+@click.option("--output-prefix", "-o", required=True, help="Sample ID prefix for outputs")
+def main(...):
+    ...
+```
+
+- Output naming: `{output_prefix}_<artifact>.tsv` or `.tsv.gz` to match Nextflow `path("*_zscore.tsv")` globs
+- Accept paths from Nextflow; use `Path` and validate with `exists=True` where appropriate
+- Chromosome specs: reuse `parse_chr_list` style (`chr1`, ranges `1-22`, comma lists) in `beta_to_zscore.py`
+- Use `set -euo pipefail` in shell fragments only in `.nf` files, not in Python
+
+## Editing checklist
+
+- Keep scripts runnable as `python bin/foo.py --help`
+- Avoid new heavy dependencies without updating container definitions
+- If changing CLI flags, update the matching `modules/local/*/main.nf` `script:` block in the same change

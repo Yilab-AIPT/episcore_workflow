@@ -1,0 +1,41 @@
+---
+description: Slurm, Singularity, and lustre run configuration
+globs: "conf/**/*,run_*.sh,scripts/**/*.sh"
+alwaysApply: false
+---
+
+# HPC & execution (Alioth / lustre)
+
+## Executor
+
+- Production: `-profile <panel>,alioth_slurm,singularity` (e.g. `early,alioth_slurm,singularity`)
+- Local/dev: `alioth_local` or `dev` with same Singularity bind: `-B /lustre1,/lustre2`
+- Grid search batch: `-profile grid_search,singularity` + `run_grid_search.sh` loops thresholds into separate `--outdir`
+
+## Containers (`conf/alioth_slurm.config`)
+
+| Process pattern | Image |
+|-----------------|--------|
+| `METHYLDACKEL.*` | `containers/methyldackel.sif` |
+| `PICARD_*` | `containers/picard_3.4.0.sif` |
+| Most local/python | `containers/common_tools.sif` |
+
+- Default queue: `cn-long`; `publishDir` → `${params.outdir}/<process_name>/`
+- Intermediate steps often `publishDir = [ enabled: false ]`
+
+## Required launch args
+
+```bash
+nextflow run main.nf \
+  --input <samplesheet.csv> \
+  --outdir <lustre_results_path> \
+  --step <split_bam|beta_zscore|grid_search>
+```
+
+Panel profile supplies `--fasta`, `--cpg_list`, `--snp_list`, `--reference_beta_zscore_matrix`, thresholds.
+
+## Agent notes
+
+- Do not commit `.sif` files; paths use `${baseDir}/containers/...`
+- Changing cpus/memory/time requires matching process names in config `withName:` blocks
+- `workDir` is shared on lustre — warn user before suggesting concurrent runs with same workDir

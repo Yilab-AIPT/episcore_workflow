@@ -16,27 +16,12 @@ include { REPORT } from '../subworkflows/local/report.nf'
 
 workflow NIPT {
     take:
-    ch_samplesheet // channel: samplesheet read in from --input, with columns ['sample', 'tissue', 'bam']
+    ch_samplesheet // channel: samplesheet read in from --input
 
     main:
-    // Preprocess raw seqeuncing data, from fastq to clean bam
-    if (params.step == 'preprocess') {
-        // Return ch_clean_bam
-    } else {
-        ch_clean_bam = channel.empty().mix(ch_samplesheet)
-    }
-
-    // Deconvolute the clean bam to get read probability using MethylQueen
-    if (params.step in ['preprocess', 'deconv']) {
-        // Return ch_deconv_res
-    } else {
-        ch_deconv_res = channel.empty().mix(ch_samplesheet)
-    }
-
-    // Split clean bam by deconv result
-    if (params.step in ['preprocess', 'deconv', 'split_bam']) {
-        // Split clean bam by deconv result
-        SPLIT_BAM(ch_deconv_res)
+    // Split clean bam by deconv result (preprocess/deconv done upstream)
+    if (params.step == 'split_bam') {
+        SPLIT_BAM(ch_samplesheet)
         SPLIT_BAM.out.splitted_bam
             .set { ch_splitted_bam }
 
@@ -56,15 +41,13 @@ workflow NIPT {
     }
 
     // Calculate beta-zscore and SNP-est-ff
-    if (params.step in ['preprocess', 'deconv', 'split_bam', 'beta_zscore']) {
-        // Calculate beta-zscore
+    if (params.step in ['split_bam', 'beta_zscore']) {
         CALC_BETA_ZSCORE(ch_splitted_bam)
         CALC_BETA_ZSCORE.out.zscore
             .set { ch_beta_zscore }
         CALC_BETA_ZSCORE.out.beta_value
             .set { ch_beta_value }
 
-        // Estimate fetal fraction
         ESTIMATE_FF(ch_splitted_bam)
         ESTIMATE_FF.out.snp_pileup
             .set { ch_snp_pileup }
@@ -77,17 +60,8 @@ workflow NIPT {
         ch_snp_ff = channel.empty()
     }
 
-    // Calculate rc-zscore
-    if (params.step in ['preprocess', 'deconv', 'rc_zscore']) {
-        // Return ch_rc_zscore
-    } else {
-        ch_rc_zscore = channel.empty()
-    }
-
     // Generate final report
-    // For early version: only focusing on beta_zscore results
-    // Interfaces for ch_clean_bam/ch_deconv_res/ch_splitted_bam/ch_rc_zscore are left for future development
-    if (params.step in ['preprocess', 'deconv', 'split_bam', 'beta_zscore']) {
+    if (params.step in ['split_bam', 'beta_zscore']) {
         REPORT(
             ch_beta_zscore,
             ch_beta_value,

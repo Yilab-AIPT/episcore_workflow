@@ -1,0 +1,20 @@
+---
+description: Episcore NIPT pipeline context and agent boundaries
+alwaysApply: true
+---
+
+# Episcore project context
+
+NIPT trisomy workflow: deconv-based BAM split → MethylDackel bedGraph → beta/z-score vs reference → SNP FF → report.
+
+**Steps**: `split_bam` | `beta_zscore` | `grid_search` | `est_ff_from_bam` | `est_ff_from_pileup` (see `AGENTS.md`).
+
+**SNP FF workflow** (`workflows/snp_est_ff.nf`, `params.step=est_ff_from_bam|est_ff_from_pileup`): standalone SNP-based fetal fraction path. `est_ff_from_bam` runs `SPLIT_BAM` → `BAM_TO_PILEUP`; `est_ff_from_pileup` consumes a pileup directly. Both end in `ESTIMATE_FF_HIGHER_PRECISION` (`bin/estimate_ff_with_higher_precision.py`). Skips beta/z-score and report.
+
+**Paths**: Pipeline root is this repo; data under `/lustre1/cqyi/AIPT_2.0/data/`; results under `.../results/episcore_output/`; tmp workDir in `nextflow.config`.
+
+**Gitignored**: `assets/`, `containers/`, `notebooks/`, `results/`, `work/`, `*logs*`. Do not add these to commits.
+
+**Scope**: Prefer editing `modules/local`, `subworkflows/local`, `lib`, `bin` over vendored `modules/nf-core`. Offline sweeps live in `scripts/` — separate from `main.nf` unless asked to wire in.
+
+**Panel configs**: `conf/early.config`, `early_240k.config`, `middle.config`, etc. set `cpg_list`, `snp_list`, `reference_beta_zscore_matrix`.

@@ -6,8 +6,10 @@
 
 include { validateAndParseSamplesheet } from './lib/samplesheet_parser.nf'
 include { validateAndParseGridSearchParameters } from './lib/grid_search_parameters_parser.nf'
+include { validateAndParseSnpFFSamplesheet } from './lib/snp_est_ff_samplesheet_parser.nf'
 include { NIPT  } from './workflows/nipt'
 include { GRID_SEARCH } from './workflows/grid_search'
+include { SNP_EST_FF } from './workflows/snp_est_ff'
 
 workflow MAIN {
     take:
@@ -29,6 +31,16 @@ workflow SUB {
     )
 }
 
+workflow EST_FF {
+    take:
+    ch_samplesheet
+
+    main:
+    SNP_EST_FF (
+        ch_samplesheet
+    )
+}
+
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     RUN MAIN WORKFLOW
@@ -36,7 +48,7 @@ workflow SUB {
 */
 workflow {
 
-    if (params.step in ['preprocess', 'deconv', 'split_bam', 'beta_zscore', 'rc_zscore']) {
+    if (params.step in ['split_bam', 'beta_zscore']) {
         // Validate and parse samplesheet
         ch_samplesheet = validateAndParseSamplesheet(params.input, params.step)
 
@@ -56,6 +68,18 @@ workflow {
         // WORKFLOW: Run grid search workflow
         //
         SUB (
+            ch_samplesheet
+        )
+    }
+
+    if (params.step in ['est_ff_from_bam', 'est_ff_from_pileup']) {
+        // Validate and parse samplesheet
+        ch_samplesheet = validateAndParseSnpFFSamplesheet(params.input, params.step)
+
+        //
+        // WORKFLOW: Run SNP-based fetal fraction estimation workflow
+        //
+        EST_FF (
             ch_samplesheet
         )
     }
