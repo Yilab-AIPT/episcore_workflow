@@ -6,8 +6,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DRY_RUN="${DRY_RUN:-false}"
 
 NF_MAIN="/lustre1/cqyi/AIPT_2.0/workflow/episcore/main.nf"
-SAMPLESHEET="/lustre1/cqyi/AIPT_2.0/data/meta/episcore/20260508-grid_search/samplesheet.csv"
-RESULTS_BASE="/lustre1/cqyi/AIPT_2.0/results/episcore_output/20260508-grid_search"
+# SAMPLESHEET="/lustre1/cqyi/AIPT_2.0/data/meta/episcore/20260508-grid_search/samplesheet.csv"
+# RESULTS_BASE="/lustre1/cqyi/AIPT_2.0/results/episcore_output/20260508-grid_search"
+SAMPLESHEET="/lustre1/cqyi/syfan/nf_methylbert_infer/data/220k_data_mb_vs_mq/infered_samplesheet.csv"
+RESULTS_BASE="/lustre1/cqyi/syfan/nf_methylbert_infer/old_model_downsampled_episcore"
 
 LOG_DIR="${RESULTS_BASE}/logs"
 TIMESTAMP="$(date '+%Y%m%d_%H%M%S')"
