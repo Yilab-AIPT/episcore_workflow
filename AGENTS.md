@@ -15,21 +15,24 @@ Upstream work (outside this repo) produces **clean BAMs** and **deconvolution re
 | `grid_search` | `GRID_SEARCH` → `EXTRACT_BETA` | `sample`, `clean_bam`, `deconv_res` |
 | `est_ff_from_bam` | `SNP_EST_FF` → `SPLIT_BAM`, `BAM_TO_PILEUP`, `ESTIMATE_FF_HIGHER_PRECISION` | `sample`, `clean_bam`, `deconv_res` |
 | `est_ff_from_pileup` | `SNP_EST_FF` → `ESTIMATE_FF_HIGHER_PRECISION` | `sample`, `pileup` |
+| `perturbed_res` | `PERTURBED_RES` → `MERGE_DECONV_RES`, `REPLACE_DECONV_PROB`, `SPLIT_BAM_BY_DECONV_RES`, `CALC_BETA_ZSCORE`, `ESTIMATE_FF` | `sample`, `full_name`, `clean_bam`, `perturbed_res`, `original_res` |
 
-`main.nf` routes by `params.step`: NIPT steps use `validateAndParseSamplesheet`; grid search uses `validateAndParseGridSearchParameters`; SNP FF steps (`est_ff_from_bam` / `est_ff_from_pileup`) use `validateAndParseSnpFFSamplesheet` (`lib/`).
+`main.nf` routes by `params.step`: NIPT steps use `validateAndParseSamplesheet`; grid search uses `validateAndParseGridSearchParameters`; SNP FF steps (`est_ff_from_bam` / `est_ff_from_pileup`) use `validateAndParseSnpFFSamplesheet`; the methylation-perturbation step (`perturbed_res`) uses `validateAndParsePerturbedResSamplesheet` (`lib/`).
 
 The **SNP FF** workflow (`workflows/snp_est_ff.nf`, entry `EST_FF`) is a standalone path focused only on SNP-based fetal fraction. It reuses `SPLIT_BAM` + `BAM_TO_PILEUP` to build a pileup (`est_ff_from_bam`) or consumes a pre-computed pileup (`est_ff_from_pileup`), then runs `ESTIMATE_FF_HIGHER_PRECISION` (iterative range-narrowing grid search, `bin/estimate_ff_with_higher_precision.py`). It does **not** go through `CALC_BETA_ZSCORE` / `REPORT`.
+
+The **methylation-perturbation** workflow (`workflows/perturbed_res.nf`, entry `PERTURB`, `params.step=perturbed_res`) measures how perturbing read methylation status changes downstream episcore/FF. Per sample it (1) merges the (shared) `original_res` files via `MERGE_DECONV_RES`, then for each perturbation condition (`full_name`, `{sample}_*`) (2) overwrites the original `prob_class_1` with the perturbed read probabilities via `REPLACE_DECONV_PROB` (`bin/replace_deconv_prob.py`, left-join/coalesce on read `name`), (3) splits the single clean BAM with `SPLIT_BAM_BY_DECONV_RES` directly — **no `SAMTOOLS_MERGE` / `PICARD_MARKDUPLICATES`** since there is one BAM per sample — and (4) runs `CALC_BETA_ZSCORE` + `ESTIMATE_FF`. It does **not** go through `REPORT`. `meta = [id: full_name, sample: sample]`, so all per-condition outputs are keyed by `full_name`.
 
 ## Directory map
 
 ```
-main.nf                 # Top-level router (MAIN / SUB / EST_FF workflows)
+main.nf                 # Top-level router (MAIN / SUB / EST_FF / PERTURB workflows)
 nextflow.config         # params, profiles, workDir, reports
-workflows/              # nipt.nf, grid_search.nf, snp_est_ff.nf
+workflows/              # nipt.nf, grid_search.nf, snp_est_ff.nf, perturbed_res.nf
 subworkflows/local/     # split_bam, calc_beta_zscore, estimate_ff, report, extract_beta
-modules/local/          # Project-specific processes
+modules/local/          # Project-specific processes (incl. replace_deconv_prob)
 modules/nf-core/        # samtools, picard, methyldackel (vendored)
-lib/                    # Groovy samplesheet / grid-search / snp-ff parsers
+lib/                    # Groovy samplesheet / grid-search / snp-ff / perturbed-res parsers
 bin/                    # Python CLI scripts invoked by processes
 conf/                   # Profile-specific params + executor/container config
 assets/                 # Reference FASTA, CpG/SNP lists, reference z-score matrices (not in git)
@@ -46,20 +49,21 @@ nextflow run /lustre1/cqyi/AIPT_2.0/workflow/episcore/main.nf \
   -profile early,alioth_slurm,singularity \
   --input /path/to/samplesheet.csv \
   --outdir /lustre1/cqyi/AIPT_2.0/results/episcore_output/<run_id> \
-  --step split_bam   # or beta_zscore | est_ff_from_bam | est_ff_from_pileup
+  --step split_bam   # or beta_zscore | est_ff_from_bam | est_ff_from_pileup | perturbed_res
 ```
 
 - **workDir** (fixed in `nextflow.config`): `/lustre1/cqyi/AIPT_2.0/tmp/episcore_workflow_tmp_dir`
-- **Profiles**: `early`, `early_240k`, `middle`, `filter_size`, `at_analyze`, `at_ref`, `grid_search`, `test`, plus executors `alioth_slurm`, `alioth_local`, `dev`, `singularity`
+- **Profiles**: `early`, `early_240k`, `middle`, `filter_size`, `at_analyze`, `at_ref`, `grid_search`, `perturbed_res`, `test`, plus executors `alioth_slurm`, `alioth_local`, `dev`, `singularity`
 - Panel variants differ mainly in `cpg_list`, `snp_list`, `reference_beta_zscore_matrix` under `conf/*.config`
 
 ## Channel conventions
 
-- **meta**: `[id: sample]` from samplesheet `sample` column
+- **meta**: `[id: sample]` from samplesheet `sample` column (for `perturbed_res`: `[id: full_name, sample: sample]`)
 - **split_bam input**: `[meta, clean_bam, deconv_res]`
 - **beta_zscore input**: `[meta, target_bam, background_bam]`
 - **est_ff_from_bam input**: `[meta, clean_bam, deconv_res]`
 - **est_ff_from_pileup input**: `[meta, pileup]`
+- **perturbed_res input**: `[meta, clean_bam, perturbed_res, original_res]` (meta carries `id`=full_name + `sample`)
 - Processes use `tag "$meta.id"`; outputs often prefixed with `${meta.id}`
 
 ## Python ↔ Nextflow contract
@@ -68,6 +72,7 @@ nextflow run /lustre1/cqyi/AIPT_2.0/workflow/episcore/main.nf \
 - CLI: **click** + **rich**; tabular IO: **pandas** / **polars** (see `filter_deconv_res.py`, `merge_deconv_res.py`).
 - `estimate_ff.py` imports `FFEstimator` from `bin/FFEstimator.py` (same directory in container).
 - `estimate_ff_with_higher_precision.py` (SNP FF workflow) reuses `FFEstimator` + `load_and_validate_data`/`parse_*` from `estimate_ff.py`; iterative range-narrowing search via `--ff-precision`. `--mode-list` ← `params.snp_est_mode`, `--min-raw-depth` ← `params.snp_depth_threshold`, optional `--known-sites` ← `params.snp_list` (shared with `bam_to_pileup.py`, filters the pileup to panel sites before estimation). It is the offline `scripts/ff_decimal/` variant adapted to a single pileup per process.
+- `replace_deconv_prob.py` (perturbed_res workflow) overwrites the merged original `prob_class_1` with the perturbed read probabilities via a polars left-join + `coalesce` on read `name` (perturbed reads are a subset of the original), emitting a `name, prob_class_1, insert_size` parquet for `SPLIT_BAM_BY_DECONV_RES`. Uses the streaming engine for the large (~10^8-row) original files.
 
 ## Agent do / don't
 

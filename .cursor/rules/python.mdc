@@ -14,7 +14,7 @@ alwaysApply: false
 
 - **CLI**: `click` with `@click.command()` / `@click.option`
 - **UX**: `rich.console.Console` for errors and progress
-- **Tables**: `pandas` (beta, FF, reports); `polars` for large deconv merge/filter (`merge_deconv_res.py`, `filter_deconv_res.py`)
+- **Tables**: `pandas` (beta, FF, reports); `polars` for large deconv merge/filter/replace (`merge_deconv_res.py`, `filter_deconv_res.py`, `replace_deconv_prob.py` — use streaming collect for ~10^8-row inputs)
 - **Genomics**: `pysam` in `bam_to_pileup.py`; `FFEstimator` class in `FFEstimator.py`
 
 ## Conventions

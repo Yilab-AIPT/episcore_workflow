@@ -29,6 +29,14 @@ Columns: `sample`, `clean_bam`, `deconv_res` (same as split_bam; used with `para
 **est_ff_from_pileup** — columns: `sample`, `pileup`
 → channel `[meta, pileup]` (merged pileup, e.g. `*_pileup.tsv.gz` from a prior `BAM_TO_PILEUP`)
 
+## Perturbation (`lib/perturbed_res_samplesheet_parser.nf`)
+
+`validateAndParsePerturbedResSamplesheet(input, step)`:
+
+**perturbed_res** — columns: `sample`, `full_name`, `clean_bam`, `perturbed_res`, `original_res`
+→ channel `[meta, clean_bam, perturbed_res, original_res]` where `meta = [id: full_name, sample: sample]`.
+One `clean_bam` per sample; multiple `original_res` per sample (merged); one row per (`full_name`, `original_res`). `full_name` (`{sample}_*`) is the per-condition output key.
+
 ## Rules
 
 - CSV with header, comma-separated

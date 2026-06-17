@@ -7,9 +7,11 @@
 include { validateAndParseSamplesheet } from './lib/samplesheet_parser.nf'
 include { validateAndParseGridSearchParameters } from './lib/grid_search_parameters_parser.nf'
 include { validateAndParseSnpFFSamplesheet } from './lib/snp_est_ff_samplesheet_parser.nf'
+include { validateAndParsePerturbedResSamplesheet } from './lib/perturbed_res_samplesheet_parser.nf'
 include { NIPT  } from './workflows/nipt'
 include { GRID_SEARCH } from './workflows/grid_search'
 include { SNP_EST_FF } from './workflows/snp_est_ff'
+include { PERTURBED_RES } from './workflows/perturbed_res'
 
 workflow MAIN {
     take:
@@ -37,6 +39,16 @@ workflow EST_FF {
 
     main:
     SNP_EST_FF (
+        ch_samplesheet
+    )
+}
+
+workflow PERTURB {
+    take:
+    ch_samplesheet
+
+    main:
+    PERTURBED_RES (
         ch_samplesheet
     )
 }
@@ -80,6 +92,18 @@ workflow {
         // WORKFLOW: Run SNP-based fetal fraction estimation workflow
         //
         EST_FF (
+            ch_samplesheet
+        )
+    }
+
+    if (params.step in ['perturbed_res']) {
+        // Validate and parse samplesheet
+        ch_samplesheet = validateAndParsePerturbedResSamplesheet(params.input, params.step)
+
+        //
+        // WORKFLOW: Run methylation-perturbation workflow
+        //
+        PERTURB (
             ch_samplesheet
         )
     }
