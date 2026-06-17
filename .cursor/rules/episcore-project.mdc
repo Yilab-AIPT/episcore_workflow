@@ -9,7 +9,9 @@ NIPT trisomy workflow: deconv-based BAM split → MethylDackel bedGraph → beta
 
 **Steps**: `split_bam` | `beta_zscore` | `grid_search` | `est_ff_from_bam` | `est_ff_from_pileup` | `perturbed_res` (see `AGENTS.md`).
 
-**SNP FF workflow** (`workflows/snp_est_ff.nf`, `params.step=est_ff_from_bam|est_ff_from_pileup`): standalone SNP-based fetal fraction path. `est_ff_from_bam` runs `SPLIT_BAM` → `BAM_TO_PILEUP`; `est_ff_from_pileup` consumes a pileup directly. Both end in `ESTIMATE_FF_HIGHER_PRECISION` (`bin/estimate_ff_with_higher_precision.py`). Skips beta/z-score and report.
+**NIPT FF** (`subworkflows/local/estimate_ff.nf`): `BAM_TO_PILEUP` then `SNP_TO_FF` (`estimate_ff.py`) by default; when `params.ff_precision` is set, uses `ESTIMATE_FF_HIGHER_PRECISION` (`estimate_ff_with_higher_precision.py`, passes `--ff-precision`).
+
+**SNP FF workflow** (`workflows/snp_est_ff.nf`, `params.step=est_ff_from_bam|est_ff_from_pileup`): standalone SNP-based fetal fraction path. `est_ff_from_bam` runs `SPLIT_BAM` → `BAM_TO_PILEUP`; `est_ff_from_pileup` consumes a pileup directly. Both always end in `ESTIMATE_FF_HIGHER_PRECISION` (`bin/estimate_ff_with_higher_precision.py`). Skips beta/z-score and report.
 
 **Perturbation workflow** (`workflows/perturbed_res.nf`, `params.step=perturbed_res`): merges per-sample `original_res` (`MERGE_DECONV_RES`), overwrites original read probs with perturbed probs per condition (`REPLACE_DECONV_PROB` / `bin/replace_deconv_prob.py`, coalesce on read `name`), splits the single clean BAM directly with `SPLIT_BAM_BY_DECONV_RES` (no `SAMTOOLS_MERGE` / `PICARD_MARKDUPLICATES`), then runs `CALC_BETA_ZSCORE` + `ESTIMATE_FF`. Skips report. `meta = [id: full_name, sample: sample]`.
 

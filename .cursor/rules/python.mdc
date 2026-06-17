@@ -8,7 +8,7 @@ alwaysApply: false
 
 ## Role
 
-`bin/*.py` run inside Nextflow processes (Singularity `common_tools.sif` etc.). `scripts/**/*.py` are offline batch analysis — may duplicate logic; prefer fixing `bin/` and syncing copies only if user requests.
+`bin/*.py` run inside Nextflow processes (Singularity `containers/common_tools.sif` — default Python environment; see `AGENTS.md`). `scripts/**/*.py` are offline batch analysis — may duplicate logic; prefer fixing `bin/` and syncing copies only if user requests.
 
 ## Stack
 

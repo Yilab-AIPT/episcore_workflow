@@ -10,7 +10,7 @@ alwaysApply: false
 
 - **Router**: `main.nf` — `workflow MAIN` (NIPT) / `SUB` (grid search) / `EST_FF` (SNP FF) / `PERTURB` (methylation perturbation); gate on `params.step`
 - **Workflows**: `workflows/*.nf` orchestrate subworkflows only (`nipt.nf`, `grid_search.nf`, `snp_est_ff.nf`, `perturbed_res.nf`)
-- **Subworkflows**: `subworkflows/local/*.nf` — channel wiring, `branch`/`groupTuple` for multi-file samples
+- **Subworkflows**: `subworkflows/local/*.nf` — channel wiring, `branch`/`groupTuple` for multi-file samples; `estimate_ff.nf` branches on `params.ff_precision` (`SNP_TO_FF` vs `ESTIMATE_FF_HIGHER_PRECISION`)
 - **Processes**: `modules/local/<tool>/main.nf` or aliased nf-core includes
 
 ## Patterns to follow
