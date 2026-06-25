@@ -10,3 +10,4 @@ containers
 *.pyc
 *logs*
 __pycache__/
+*.out

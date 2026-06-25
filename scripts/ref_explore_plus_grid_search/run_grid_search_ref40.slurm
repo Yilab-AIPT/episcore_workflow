@@ -1,0 +1,62 @@
+#!/usr/bin/bash
+#SBATCH -J grid_search_ref40
+#SBATCH --partition=cn-long
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=24G
+#SBATCH -o logs/%x_%a.log
+#SBATCH -e logs/%x_%a.log
+
+# Random ref-40 episcore/zscore/ezscore grid search.
+# One array task == one repeat (one random 40-sample reference draw).
+#
+# Usage:
+#     sbatch run_grid_search_ref40.slurm [<input_dir>] [<output_base>]
+#
+# Environment (optional):
+#     TOTAL_REPEATS  default 100
+#     MODE           default dev_test_split  (or: all)
+#     MIN_FF         default 0
+#
+# Defaults:
+#     input_dir   : /lustre1/cqyi/AIPT_2.0/data/meta/episcore/20260621-ref_40_rebuild_consider_lib_ng
+#     output_base : /lustre1/cqyi/AIPT_2.0/results/episcore_output/20260621-ref_40_rebuild_consider_lib_ng
+
+set -euo pipefail
+
+INPUT_DIR=${1:-/lustre1/cqyi/AIPT_2.0/data/meta/episcore/20260621-ref_40_rebuild_consider_lib_ng}
+OUTPUT_BASE=${2:-/lustre1/cqyi/AIPT_2.0/results/episcore_output/20260621-ref_40_rebuild_consider_lib_ng}
+TOTAL_REPEATS=${TOTAL_REPEATS:-100}
+MODE=${MODE:-dev_test_split}
+MIN_FF=${MIN_FF:-0}
+SIF=${SIF:-/lustre1/cqyi/syfan/images/common_tools.sif}
+
+SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+cd "$SCRIPT_DIR"
+mkdir -p logs
+
+REPEAT_START=${SLURM_ARRAY_TASK_ID}
+REPEAT_END=$((REPEAT_START + 1))
+
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+
+echo "[$(date)] grid_search_ref40 array=${SLURM_ARRAY_TASK_ID} host=$(hostname)"
+echo "  input dir    : $INPUT_DIR"
+echo "  output base  : $OUTPUT_BASE"
+echo "  repeat range : [$REPEAT_START, $REPEAT_END) of $TOTAL_REPEATS"
+echo "  mode         : $MODE"
+echo "  min-ff       : $MIN_FF"
+
+singularity exec -B /lustre1,/lustre2,/appsnew "$SIF" \
+    python3 grid_search_ref40.py \
+        --input-dir "$INPUT_DIR" \
+        --output-base "$OUTPUT_BASE" \
+        --total-repeats "$TOTAL_REPEATS" \
+        --repeat-start "$REPEAT_START" \
+        --repeat-end "$REPEAT_END" \
+        --mode "$MODE" \
+        --min-ff "$MIN_FF"
+
+echo "[$(date)] Finished grid_search_ref40 array=${SLURM_ARRAY_TASK_ID}"
