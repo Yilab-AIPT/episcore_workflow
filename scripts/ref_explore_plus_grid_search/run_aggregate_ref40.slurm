@@ -19,7 +19,7 @@ set -euo pipefail
 OUTPUT_BASE=${1:-/lustre1/cqyi/AIPT_2.0/results/episcore_output/20260621-ref_40_rebuild_consider_lib_ng}
 SELECT_SCORE=${SELECT_SCORE:-ezscore}
 SELECT_METRIC=${SELECT_METRIC:-mean_dev_test}
-SIF=${SIF:-/lustre1/cqyi/syfan/images/common_tools.sif}
+SIF=${SIF:-/lustre1/cqyi/AIPT_2.0/workflow/episcore/containers/common_tools.sif}
 
 SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 cd "$SCRIPT_DIR"

@@ -13,19 +13,25 @@ For each repeat:
            reference mean/std.
          - zscore (chromosome percentage) from ``zscore_grid_search.parquet``,
            normalized by the 40-sample reference mean/std.
-    3. Run grid-search "method 3" (see
-       ``notebooks/aipt_2.0/grid_search_for_smaller_panel_autosomes.ipynb``)
-       independently for episcore and zscore to pick a per-chromosome best
-       (threshold, recall) combo on the grid-search analyze set:
-         - ``dev_test_split`` (default): dev analyze samples only
-         - ``all``: all analyze samples (after ``--min-ff`` filter)
+    3. Run grid search independently for episcore and zscore on the
+       grid-search analyze set. Combo selection strategy depends on ``--mode``:
+         - ``dev_test_split`` / ``all`` ("method 3"): per-chromosome best
+           (threshold, recall) combo (see
+           ``notebooks/aipt_2.0/grid_search_for_smaller_panel_autosomes.ipynb``)
+         - ``fix_combo_split`` / ``fix_combo_all``: one shared (threshold,
+           recall) combo for all chromosomes
+       Sample sets:
+         - ``dev_test_split`` / ``fix_combo_split``: grid search on dev only,
+           report dev + test
+         - ``all`` / ``fix_combo_all``: all analyze samples (after ``--min-ff``)
     4. Build ezscore = z-normalize(zscore + episcore) where, per chromosome,
        zscore uses the best zscore combo and episcore the best episcore combo,
        and the mean/std are taken over the fixed ezscore reference sample list
        (``ezscore_ref_samples.txt``).
     5. Compute confusion (TP/TN/FP/FN) and MCC for episcore, zscore and ezscore.
-       ``dev_test_split`` reports dev and test sets; ``all`` reports one ``all``
-       row. A sample is positive when any chromosome score exceeds ``--cutoff``
+       ``dev_test_split`` / ``fix_combo_split`` report dev and test sets;
+       ``all`` / ``fix_combo_all`` report one ``all`` row. A sample is positive
+       when any chromosome score exceeds ``--cutoff``
        (default 3.0); the negative class is ``Normal``.
 
 Samples with ``ff_before_mq <= --min-ff`` are excluded from analyze/grid-search
@@ -368,6 +374,68 @@ def method3_grid_search(
     return best_combos, has_target, best_min_recall
 
 
+def fixed_combo_grid_search(
+    score_all: np.ndarray,
+    combos: List[Tuple[float, float]],
+    grid_idx: np.ndarray,
+    grid_labels: np.ndarray,
+    cutoff: float,
+) -> Tuple[Dict[str, Tuple[float, float]], Dict[str, bool], float]:
+    """Pick one (threshold, recall) combo shared by all chromosomes.
+
+    Each combo is scored by overall sample-level MCC on the grid-search set
+    (positive when any chromosome exceeds ``cutoff``). Returns the same combo
+    for every chromosome plus ``has_target`` flags per chromosome.
+    """
+    combo_index = {c: i for i, c in enumerate(combos)}
+    grid_is_normal = grid_labels == "Normal"
+    has_target = {
+        chrom: bool((grid_labels == chrom.replace("chr", "T")).any())
+        for chrom in CHR_LIST
+    }
+
+    best_combo: Optional[Tuple[float, float]] = None
+    best_mcc = -np.inf
+    for combo in combos:
+        chr_combos = {chrom: combo for chrom in CHR_LIST}
+        conf = _overall_confusion(
+            score_all, combo_index, chr_combos, grid_idx, grid_is_normal, cutoff
+        )
+        mcc = conf["mcc"]
+        better = False
+        if mcc > best_mcc:
+            better = True
+        elif np.isclose(mcc, best_mcc):
+            if best_combo is None:
+                better = True
+            elif combo[1] > best_combo[1]:
+                better = True
+            elif np.isclose(combo[1], best_combo[1]) and combo[0] < best_combo[0]:
+                better = True
+        if better:
+            best_mcc = mcc
+            best_combo = combo
+
+    if best_combo is None:
+        raise RuntimeError("fixed_combo_grid_search found no valid combo")
+
+    best_combos = {chrom: best_combo for chrom in CHR_LIST}
+    return best_combos, has_target, best_combo[1]
+
+
+def _resolve_mode(mode: str) -> Tuple[str, bool]:
+    """Return (sample_split, use_fixed_combo)."""
+    if mode == "all":
+        return "all", False
+    if mode == "dev_test_split":
+        return "dev_test_split", False
+    if mode == "fix_combo_all":
+        return "all", True
+    if mode == "fix_combo_split":
+        return "dev_test_split", True
+    raise ValueError(f"Unknown mode: {mode}")
+
+
 # ---------------------------------------------------------------------------
 # Per-repeat driver
 # ---------------------------------------------------------------------------
@@ -395,16 +463,15 @@ def run_repeat(
     analyze_mask = ~ref_mask & analyze_ff_mask
 
     analyze_idx = np.flatnonzero(analyze_mask)
-    if mode == "all":
+    sample_split, use_fixed_combo = _resolve_mode(mode)
+    if sample_split == "all":
         grid_idx = analyze_idx
         eval_sets: List[Tuple[str, np.ndarray]] = [("all", analyze_idx)]
-    elif mode == "dev_test_split":
+    else:
         dev_idx = np.flatnonzero(analyze_mask & (set_arr == "dev"))
         test_idx = np.flatnonzero(analyze_mask & (set_arr == "test"))
         grid_idx = dev_idx
         eval_sets = [("dev", dev_idx), ("test", test_idx)]
-    else:
-        raise ValueError(f"Unknown mode: {mode}")
 
     if grid_idx.size == 0:
         raise ValueError(f"mode={mode}: no analyze samples available for grid search")
@@ -413,12 +480,13 @@ def run_repeat(
     episcore_all = compute_episcore(ep_arrays[0], ep_arrays[1], ep_arrays[2], ep_arrays[3], ref_idx)
     zscore_all = compute_zscore(z_array, ref_idx)
 
-    # --- method-3 grid search on grid_idx ----------------------------------
-    ep_best, ep_has_target, ep_min_recall = method3_grid_search(
-        episcore_all, ep_combos, grid_idx, label_arr[grid_idx], cutoff
+    grid_labels = label_arr[grid_idx]
+    grid_search = fixed_combo_grid_search if use_fixed_combo else method3_grid_search
+    ep_best, ep_has_target, ep_min_recall = grid_search(
+        episcore_all, ep_combos, grid_idx, grid_labels, cutoff
     )
-    z_best, z_has_target, z_min_recall = method3_grid_search(
-        zscore_all, z_combos, grid_idx, label_arr[grid_idx], cutoff
+    z_best, z_has_target, z_min_recall = grid_search(
+        zscore_all, z_combos, grid_idx, grid_labels, cutoff
     )
 
     ep_combo_index = {c: i for i, c in enumerate(ep_combos)}
@@ -540,8 +608,9 @@ def run_repeat(
 @click.option("--ezscore-ref-file", default="ezscore_ref_samples.txt", show_default=True,
               help="File name (under input-dir) or path of the ezscore reference list")
 @click.option("--mode", default="dev_test_split", show_default=True,
-              type=click.Choice(["dev_test_split", "all"]),
-              help="dev_test_split: grid search on dev, report dev+test; all: use all analyze samples")
+              type=click.Choice(["dev_test_split", "all", "fix_combo_all", "fix_combo_split"]),
+              help="dev_test_split/all: per-chr combo (method 3); "
+                   "fix_combo_all/fix_combo_split: one combo for all chromosomes")
 @click.option("--min-ff", default=0.0, show_default=True, type=float,
               help="Keep samples with ff_before_mq > min_ff")
 def main(
@@ -671,7 +740,8 @@ def main(
                 ep_combos, ep_arrays, z_combos, z_array, cutoff, mode, analyze_ff_mask, repeat_dir,
             )
             summaries.append(summary)
-            if mode == "all":
+            sample_split, _ = _resolve_mode(mode)
+            if sample_split == "all":
                 console.print(
                     f"  repeat {repeat_index}: ez all MCC={summary['ezscore_all_mcc']:.3f}"
                 )
