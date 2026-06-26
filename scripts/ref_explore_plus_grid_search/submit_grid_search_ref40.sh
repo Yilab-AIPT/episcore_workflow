@@ -5,22 +5,25 @@
 # Usage:
 #     ./submit_grid_search_ref40.sh [-n|--dry-run] [--no-aggregate] \
 #         [--input-dir <path>] [--output-base <dir>] [--total-repeats <N>] \
-#         [--mode dev_test_split|all|fix_combo_all|fix_combo_split] [--min-ff <float>] \
+#         [--split-mode dev_test_split|even_split|all] \
+#         [--combo-mode flexible|fix] [--min-ff <float>] \
 #         [--finalize] [--repeats-per-job <N>] [--max-array-jobs <N>]
 #
 # Defaults:
-#     input_dir   : /lustre1/cqyi/AIPT_2.0/data/meta/episcore/20260621-ref_40_rebuild_consider_lib_ng
-#     output_base : /lustre1/cqyi/AIPT_2.0/results/episcore_output/20260621-ref_40_rebuild_consider_lib_ng
+#     input_dir     : /lustre1/cqyi/AIPT_2.0/data/meta/episcore/20260621-ref_40_rebuild_consider_lib_ng
+#     output_base   : /lustre1/cqyi/AIPT_2.0/results/episcore_output/20260621-ref_40_rebuild_consider_lib_ng
 #     total_repeats : 100
-#     mode        : dev_test_split
-#     min-ff      : 0
+#     split-mode    : dev_test_split
+#     combo-mode    : flexible
+#     min-ff        : 0
 
 set -euo pipefail
 
 INPUT_DIR=/lustre1/cqyi/AIPT_2.0/data/meta/episcore/20260621-ref_40_rebuild_consider_lib_ng
 OUTPUT_BASE=/lustre1/cqyi/AIPT_2.0/results/episcore_output/20260621-ref_40_rebuild_consider_lib_ng
 TOTAL_REPEATS=100
-MODE=dev_test_split
+SPLIT_MODE=dev_test_split
+COMBO_MODE=flexible
 MIN_FF=0
 DRY_RUN=${DRY_RUN:-0}
 AGGREGATE=1
@@ -32,7 +35,7 @@ SELECT_METRIC=mean_dev_test
 REPEATS_PER_JOB=100
 MAX_ARRAY_JOBS=100
 
-usage() { sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 compute_array_size() {
     N_JOBS=$(( (TOTAL_REPEATS + REPEATS_PER_JOB - 1) / REPEATS_PER_JOB ))
@@ -54,7 +57,8 @@ while [ $# -gt 0 ]; do
         --input-dir) INPUT_DIR=$2; shift 2 ;;
         --output-base) OUTPUT_BASE=$2; shift 2 ;;
         --total-repeats) TOTAL_REPEATS=$2; shift 2 ;;
-        --mode) MODE=$2; shift 2 ;;
+        --split-mode) SPLIT_MODE=$2; shift 2 ;;
+        --combo-mode) COMBO_MODE=$2; shift 2 ;;
         --min-ff) MIN_FF=$2; shift 2 ;;
         --finalize) FINALIZE=1; shift ;;
         --n-ezscore-ref) N_EZSCORE_REF=$2; shift 2 ;;
@@ -67,13 +71,17 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-if [ "$MODE" != "dev_test_split" ] && [ "$MODE" != "all" ] \
-        && [ "$MODE" != "fix_combo_all" ] && [ "$MODE" != "fix_combo_split" ]; then
-    echo "ERROR: --mode must be dev_test_split, all, fix_combo_all, or fix_combo_split (got: $MODE)" >&2
+if [ "$SPLIT_MODE" != "dev_test_split" ] && [ "$SPLIT_MODE" != "even_split" ] \
+        && [ "$SPLIT_MODE" != "all" ]; then
+    echo "ERROR: --split-mode must be dev_test_split, even_split, or all (got: $SPLIT_MODE)" >&2
+    exit 2
+fi
+if [ "$COMBO_MODE" != "flexible" ] && [ "$COMBO_MODE" != "fix" ]; then
+    echo "ERROR: --combo-mode must be flexible or fix (got: $COMBO_MODE)" >&2
     exit 2
 fi
 
-if [ "$MODE" = "all" ] || [ "$MODE" = "fix_combo_all" ]; then
+if [ "$SPLIT_MODE" = "all" ]; then
     SELECT_METRIC=all
 fi
 
@@ -96,7 +104,8 @@ echo "Input dir      : $INPUT_DIR"
 echo "Output base    : $OUTPUT_BASE"
 echo "Total repeats  : ${TOTAL_REPEATS}"
 echo "Array          : 0-${ARRAY_LAST} (${REPEATS_PER_JOB} repeats each, $((ARRAY_LAST + 1)) jobs)"
-echo "Mode           : $MODE"
+echo "Split mode     : $SPLIT_MODE"
+echo "Combo mode     : $COMBO_MODE"
 echo "Min FF         : $MIN_FF"
 echo "Select metric  : $SELECT_METRIC"
 echo "Aggregate      : $([ "$AGGREGATE" = 1 ] && echo yes || echo no)"
@@ -105,7 +114,8 @@ echo "Finalize       : $([ "$FINALIZE" = 1 ] && echo yes || echo no)"
 echo
 
 if [ "$DRY_RUN" = 1 ]; then
-    echo "[DRY-RUN] TOTAL_REPEATS=${TOTAL_REPEATS} REPEATS_PER_JOB=${REPEATS_PER_JOB} MODE=${MODE} MIN_FF=${MIN_FF} \\"
+    echo "[DRY-RUN] TOTAL_REPEATS=${TOTAL_REPEATS} REPEATS_PER_JOB=${REPEATS_PER_JOB} \\"
+    echo "             SPLIT_MODE=${SPLIT_MODE} COMBO_MODE=${COMBO_MODE} MIN_FF=${MIN_FF} \\"
     echo "             sbatch --parsable --array=0-${ARRAY_LAST} run_grid_search_ref40.slurm \\"
     echo "             '$INPUT_DIR' '$OUTPUT_BASE'"
     if [ "$AGGREGATE" = 1 ]; then
@@ -119,7 +129,8 @@ if [ "$DRY_RUN" = 1 ]; then
     exit 0
 fi
 
-array_jobid=$(TOTAL_REPEATS="$TOTAL_REPEATS" REPEATS_PER_JOB="$REPEATS_PER_JOB" MODE="$MODE" MIN_FF="$MIN_FF" sbatch --parsable \
+array_jobid=$(TOTAL_REPEATS="$TOTAL_REPEATS" REPEATS_PER_JOB="$REPEATS_PER_JOB" \
+    SPLIT_MODE="$SPLIT_MODE" COMBO_MODE="$COMBO_MODE" MIN_FF="$MIN_FF" sbatch --parsable \
     --job-name=grid_search_ref40 \
     --array="0-${ARRAY_LAST}" \
     run_grid_search_ref40.slurm "$INPUT_DIR" "$OUTPUT_BASE")

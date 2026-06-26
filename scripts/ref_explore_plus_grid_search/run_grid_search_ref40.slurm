@@ -15,8 +15,8 @@
 # Environment (optional):
 #     TOTAL_REPEATS    default 100
 #     REPEATS_PER_JOB  default 100  (repeats per array task)
-#     MODE             default dev_test_split
-#                      (dev_test_split | all | fix_combo_all | fix_combo_split)
+#     SPLIT_MODE       default dev_test_split  (dev_test_split | even_split | all)
+#     COMBO_MODE       default flexible        (flexible | fix)
 #     MIN_FF           default 0
 #
 # Defaults:
@@ -29,7 +29,8 @@ INPUT_DIR=${1:-/lustre1/cqyi/AIPT_2.0/data/meta/episcore/20260621-ref_40_rebuild
 OUTPUT_BASE=${2:-/lustre1/cqyi/AIPT_2.0/results/episcore_output/20260621-ref_40_rebuild_consider_lib_ng}
 TOTAL_REPEATS=${TOTAL_REPEATS:-100}
 REPEATS_PER_JOB=${REPEATS_PER_JOB:-100}
-MODE=${MODE:-dev_test_split}
+SPLIT_MODE=${SPLIT_MODE:-dev_test_split}
+COMBO_MODE=${COMBO_MODE:-flexible}
 MIN_FF=${MIN_FF:-0}
 SIF=${SIF:-/lustre1/cqyi/AIPT_2.0/workflow/episcore/containers/common_tools.sif}
 
@@ -57,8 +58,9 @@ echo "  input dir       : $INPUT_DIR"
 echo "  output base     : $OUTPUT_BASE"
 echo "  repeats / chunk : $REPEATS_PER_JOB"
 echo "  repeat range    : [$REPEAT_START, $REPEAT_END) of $TOTAL_REPEATS"
-echo "  mode         : $MODE"
-echo "  min-ff       : $MIN_FF"
+echo "  split-mode      : $SPLIT_MODE"
+echo "  combo-mode      : $COMBO_MODE"
+echo "  min-ff          : $MIN_FF"
 
 singularity exec -B /lustre1,/lustre2,/appsnew "$SIF" \
     python3 grid_search_ref40.py \
@@ -67,7 +69,8 @@ singularity exec -B /lustre1,/lustre2,/appsnew "$SIF" \
         --total-repeats "$TOTAL_REPEATS" \
         --repeat-start "$REPEAT_START" \
         --repeat-end "$REPEAT_END" \
-        --mode "$MODE" \
+        --split-mode "$SPLIT_MODE" \
+        --combo-mode "$COMBO_MODE" \
         --min-ff "$MIN_FF"
 
 echo "[$(date)] Finished grid_search_ref40 array=${SLURM_ARRAY_TASK_ID}"

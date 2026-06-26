@@ -14,23 +14,22 @@ For each repeat:
          - zscore (chromosome percentage) from ``zscore_grid_search.parquet``,
            normalized by the 40-sample reference mean/std.
     3. Run grid search independently for episcore and zscore on the
-       grid-search analyze set. Combo selection strategy depends on ``--mode``:
-         - ``dev_test_split`` / ``all`` ("method 3"): per-chromosome best
-           (threshold, recall) combo (see
+       grid-search analyze set. Controlled by ``--split-mode`` and
+       ``--combo-mode``:
+         - ``--combo-mode flexible``: per-chromosome best (threshold, recall)
+           combo ("method 3"; see
            ``notebooks/aipt_2.0/grid_search_for_smaller_panel_autosomes.ipynb``)
-         - ``fix_combo_split`` / ``fix_combo_all``: one shared (threshold,
-           recall) combo for all chromosomes
-       Sample sets:
-         - ``dev_test_split`` / ``fix_combo_split``: grid search on dev only,
-           report dev + test
-         - ``all`` / ``fix_combo_all``: all analyze samples (after ``--min-ff``)
+         - ``--combo-mode fix``: one shared (threshold, recall) for all chr
+         - ``--split-mode dev_test_split``: meta.csv dev/test columns
+         - ``--split-mode even_split``: per-label even dev/test (singletons -> dev)
+         - ``--split-mode all``: all analyze samples for grid search + eval
     4. Build ezscore = z-normalize(zscore + episcore) where, per chromosome,
        zscore uses the best zscore combo and episcore the best episcore combo,
        and the mean/std are taken over the fixed ezscore reference sample list
        (``ezscore_ref_samples.txt``).
     5. Compute confusion (TP/TN/FP/FN) and MCC for episcore, zscore and ezscore.
-       ``dev_test_split`` / ``fix_combo_split`` report dev and test sets;
-       ``all`` / ``fix_combo_all`` report one ``all`` row. A sample is positive
+       ``dev_test_split`` / ``even_split`` report dev and test sets;
+       ``all`` reports one ``all`` row. A sample is positive
        when any chromosome score exceeds ``--cutoff``
        (default 3.0); the negative class is ``Normal``.
 
@@ -56,7 +55,7 @@ import math
 import sys
 import warnings
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import click
 import numpy as np
@@ -423,22 +422,28 @@ def fixed_combo_grid_search(
     return best_combos, has_target, best_combo[1]
 
 
-def _resolve_mode(mode: str) -> Tuple[str, bool]:
-    """Return (sample_split, use_fixed_combo)."""
-    if mode == "all":
-        return "all", False
-    if mode == "dev_test_split":
-        return "dev_test_split", False
-    if mode == "fix_combo_all":
-        return "all", True
-    if mode == "fix_combo_split":
-        return "dev_test_split", True
-    raise ValueError(f"Unknown mode: {mode}")
+def assign_even_label_split(samples: Sequence[str], labels: np.ndarray) -> np.ndarray:
+    """Assign dev/test per label with counts as even as possible.
 
+    Within each label, samples are sorted by id for reproducibility.
+    Singleton labels are assigned to dev. For larger groups, dev receives
+    ``ceil(n/2)`` samples and test the remainder.
+    """
+    n = len(samples)
+    out = np.empty(n, dtype=object)
+    order = pd.DataFrame({"pos": np.arange(n), "sample": samples, "label": labels})
+    for _, grp in order.groupby("label", sort=True):
+        grp = grp.sort_values("sample", kind="mergesort")
+        pos = grp["pos"].to_numpy(dtype=np.int64)
+        count = pos.size
+        if count == 1:
+            out[pos] = "dev"
+            continue
+        n_dev = (count + 1) // 2
+        out[pos[:n_dev]] = "dev"
+        out[pos[n_dev:]] = "test"
+    return out
 
-# ---------------------------------------------------------------------------
-# Per-repeat driver
-# ---------------------------------------------------------------------------
 
 def run_repeat(
     repeat_index: int,
@@ -453,7 +458,8 @@ def run_repeat(
     z_combos: List[Tuple[float, float]],
     z_array: np.ndarray,
     cutoff: float,
-    mode: str,
+    split_mode: str,
+    combo_mode: str,
     analyze_ff_mask: np.ndarray,
     out_dir: Path,
 ) -> Dict[str, object]:
@@ -463,8 +469,8 @@ def run_repeat(
     analyze_mask = ~ref_mask & analyze_ff_mask
 
     analyze_idx = np.flatnonzero(analyze_mask)
-    sample_split, use_fixed_combo = _resolve_mode(mode)
-    if sample_split == "all":
+    use_fixed_combo = combo_mode == "fix"
+    if split_mode == "all":
         grid_idx = analyze_idx
         eval_sets: List[Tuple[str, np.ndarray]] = [("all", analyze_idx)]
     else:
@@ -472,9 +478,16 @@ def run_repeat(
         test_idx = np.flatnonzero(analyze_mask & (set_arr == "test"))
         grid_idx = dev_idx
         eval_sets = [("dev", dev_idx), ("test", test_idx)]
+        if test_idx.size == 0 and split_mode == "even_split":
+            raise ValueError(
+                f"split_mode={split_mode}: even label split produced no test samples"
+            )
 
     if grid_idx.size == 0:
-        raise ValueError(f"mode={mode}: no analyze samples available for grid search")
+        raise ValueError(
+            f"split_mode={split_mode}, combo_mode={combo_mode}: "
+            "no analyze samples available for grid search"
+        )
 
     # --- episcore / zscore scores for all combos ---------------------------
     episcore_all = compute_episcore(ep_arrays[0], ep_arrays[1], ep_arrays[2], ep_arrays[3], ref_idx)
@@ -607,10 +620,12 @@ def run_repeat(
               help="File name (under input-dir) or path of the candidate reference pool")
 @click.option("--ezscore-ref-file", default="ezscore_ref_samples.txt", show_default=True,
               help="File name (under input-dir) or path of the ezscore reference list")
-@click.option("--mode", default="dev_test_split", show_default=True,
-              type=click.Choice(["dev_test_split", "all", "fix_combo_all", "fix_combo_split"]),
-              help="dev_test_split/all: per-chr combo (method 3); "
-                   "fix_combo_all/fix_combo_split: one combo for all chromosomes")
+@click.option("--split-mode", default="dev_test_split", show_default=True,
+              type=click.Choice(["dev_test_split", "even_split", "all"]),
+              help="dev_test_split/even_split: grid on dev, eval dev+test; all: all samples")
+@click.option("--combo-mode", default="flexible", show_default=True,
+              type=click.Choice(["flexible", "fix"]),
+              help="flexible: per-chr combo (method 3); fix: one combo for all chr")
 @click.option("--min-ff", default=0.0, show_default=True, type=float,
               help="Keep samples with ff_before_mq > min_ff")
 def main(
@@ -624,7 +639,8 @@ def main(
     cutoff: float,
     ref_pool_file: str,
     ezscore_ref_file: str,
-    mode: str,
+    split_mode: str,
+    combo_mode: str,
     min_ff: float,
 ) -> None:
     """Run random ref-40 episcore/zscore/ezscore grid search repeats."""
@@ -645,7 +661,8 @@ def main(
     console.print(f"  Repeat range : [{repeat_start}, {repeat_end}) of {total_repeats}")
     console.print(f"  ref-n / seed : {ref_n} / {seed}")
     console.print(f"  cutoff       : {cutoff}")
-    console.print(f"  mode         : {mode}")
+    console.print(f"  split-mode   : {split_mode}")
+    console.print(f"  combo-mode   : {combo_mode}")
     console.print(f"  min-ff       : {min_ff}")
 
     # --- meta ---------------------------------------------------------------
@@ -701,6 +718,32 @@ def main(
     analyze_ff_mask = ff_arr > min_ff
 
     n_analyze_ff = int(analyze_ff_mask.sum())
+    if split_mode == "even_split":
+        analyze_pos = np.flatnonzero(analyze_ff_mask)
+        even_sets = assign_even_label_split(
+            [samples[i] for i in analyze_pos],
+            label_arr[analyze_pos],
+        )
+        set_arr = np.full(len(samples), "", dtype=object)
+        set_arr[analyze_pos] = even_sets
+        if repeat_start == 0:
+            split_rows = []
+            for i in analyze_pos:
+                split_rows.append(
+                    {"sample": samples[i], "label": label_arr[i], "set": set_arr[i],
+                     "ff_before_mq": ff_arr[i]}
+                )
+            split_df = pd.DataFrame(split_rows).sort_values(["label", "sample"]).reset_index(drop=True)
+            split_path = Path(output_base) / "even_label_split.tsv"
+            split_df.to_csv(split_path, sep="\t", index=False)
+            split_stats = split_df.groupby(["label", "set"]).size().unstack(fill_value=0)
+            console.print(f"[green]OK[/green] Wrote {split_path}")
+            console.print("[cyan]Even label split (dev/test counts by label):[/cyan]")
+            console.print(split_stats.to_string())
+            n_dev = int((split_df["set"] == "dev").sum())
+            n_test = int((split_df["set"] == "test").sum())
+            console.print(f"  even split total : dev={n_dev} test={n_test}")
+
     console.print(f"  samples (universe) : {len(samples)}")
     console.print(f"  analyze (ff>{min_ff:g}) : {n_analyze_ff}")
     console.print("[cyan]Building dense arrays ...[/cyan]")
@@ -737,11 +780,11 @@ def main(
         try:
             summary = run_repeat(
                 repeat_index, ref_idx, samples, sample_index, set_arr, label_arr, ez_idx,
-                ep_combos, ep_arrays, z_combos, z_array, cutoff, mode, analyze_ff_mask, repeat_dir,
+                ep_combos, ep_arrays, z_combos, z_array, cutoff, split_mode, combo_mode,
+                analyze_ff_mask, repeat_dir,
             )
             summaries.append(summary)
-            sample_split, _ = _resolve_mode(mode)
-            if sample_split == "all":
+            if split_mode == "all":
                 console.print(
                     f"  repeat {repeat_index}: ez all MCC={summary['ezscore_all_mcc']:.3f}"
                 )

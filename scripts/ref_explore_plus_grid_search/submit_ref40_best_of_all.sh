@@ -1,26 +1,21 @@
 #!/usr/bin/bash
-# Full ref-40 pipeline: grid search (fix_combo_all) -> aggregate -> finalize.
+# Full ref-40 pipeline: split-mode=all, combo-mode=fix -> aggregate -> finalize.
 #
 # Usage:
 #     ./submit_ref40_best_of_all.sh [-n|--dry-run] [--no-finalize]
 #
 # Defaults:
-#     input_dir       : /lustre1/cqyi/AIPT_2.0/data/meta/episcore/20260621-ref_40_rebuild_consider_lib_ng
-#     output_base     : /lustre1/cqyi/AIPT_2.0/results/episcore_output/20260625-ref_40_fixed_combo_all
-#     total_repeats   : 10000
-#     repeats_per_job : 100  (100 array tasks max)
-#     mode            : fix_combo_all
-#     min-ff          : 0.01
-#     n_ezscore_ref   : 20
-#     ezscore_repeats : 5000
+#     output_base   : /lustre1/cqyi/AIPT_2.0/results/episcore_output/20260625-ref_40_fixed_combo_all
+#     total_repeats : 10000
+#     min-ff        : 0.01
 
 set -euo pipefail
 
 INPUT_DIR=/lustre1/cqyi/AIPT_2.0/data/meta/episcore/20260621-ref_40_rebuild_consider_lib_ng
 OUTPUT_BASE=/lustre1/cqyi/AIPT_2.0/results/episcore_output/20260625-ref_40_fixed_combo_all
 TOTAL_REPEATS=10000
-REPEATS_PER_JOB=100
-MODE=fix_combo_all
+SPLIT_MODE=all
+COMBO_MODE=fix
 MIN_FF=0.01
 N_EZSCORE_REF=20
 EZSCORE_REPEATS=5000
@@ -34,13 +29,11 @@ while [ $# -gt 0 ]; do
         --input-dir) INPUT_DIR=$2; shift 2 ;;
         --output-base) OUTPUT_BASE=$2; shift 2 ;;
         --total-repeats) TOTAL_REPEATS=$2; shift 2 ;;
-        --repeats-per-job) REPEATS_PER_JOB=$2; shift 2 ;;
-        --mode) MODE=$2; shift 2 ;;
         --min-ff) MIN_FF=$2; shift 2 ;;
         --n-ezscore-ref) N_EZSCORE_REF=$2; shift 2 ;;
         --ezscore-repeats) EZSCORE_REPEATS=$2; shift 2 ;;
         -h|--help)
-            sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            sed -n '2,11p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *) echo "Unknown argument: $1" >&2; exit 2 ;;
@@ -52,8 +45,8 @@ args=(
     --input-dir "$INPUT_DIR"
     --output-base "$OUTPUT_BASE"
     --total-repeats "$TOTAL_REPEATS"
-    --repeats-per-job "$REPEATS_PER_JOB"
-    --mode "$MODE"
+    --split-mode "$SPLIT_MODE"
+    --combo-mode "$COMBO_MODE"
     --min-ff "$MIN_FF"
     --n-ezscore-ref "$N_EZSCORE_REF"
     --ezscore-repeats "$EZSCORE_REPEATS"

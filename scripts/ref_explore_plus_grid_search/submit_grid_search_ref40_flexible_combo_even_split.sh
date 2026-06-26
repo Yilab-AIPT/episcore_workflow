@@ -1,21 +1,21 @@
 #!/usr/bin/bash
-# Submit random ref-40 grid search: split-mode=all, combo-mode=fix.
+# Submit random ref-40 grid search: split-mode=even_split, combo-mode=flexible.
 #
 # Usage:
-#     ./submit_grid_search_ref40_fix_combo_all.sh [-n|--dry-run]
+#     ./submit_grid_search_ref40_flexible_combo_even_split.sh [-n|--dry-run]
 #
 # Defaults:
-#     output_base   : /lustre1/cqyi/AIPT_2.0/results/episcore_output/20260625-ref_40_fixed_combo_all
+#     output_base   : /lustre1/cqyi/AIPT_2.0/results/episcore_output/20260626-ref_40_flexible_combo_even_split
 #     total_repeats : 10000
 #     min-ff        : 0.01
 
 set -euo pipefail
 
 INPUT_DIR=/lustre1/cqyi/AIPT_2.0/data/meta/episcore/20260621-ref_40_rebuild_consider_lib_ng
-OUTPUT_BASE=/lustre1/cqyi/AIPT_2.0/results/episcore_output/20260625-ref_40_fixed_combo_all
+OUTPUT_BASE=/lustre1/cqyi/AIPT_2.0/results/episcore_output/20260626-ref_40_flexible_combo_even_split
 TOTAL_REPEATS=10000
-SPLIT_MODE=all
-COMBO_MODE=fix
+SPLIT_MODE=even_split
+COMBO_MODE=flexible
 MIN_FF=0.01
 DRY_RUN=0
 
