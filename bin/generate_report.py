@@ -2,14 +2,14 @@
 """
 Generate Final Report for NIPT Analysis
 
-This script consolidates results from beta-zscore analysis and SNP-based fetal fraction
+This script consolidates results from episcore analysis and SNP-based fetal fraction
 estimation to create a comprehensive report with the following columns:
 - sample: Sample identifier
 - ff_before_mq: Average fetal fraction before MethylQueen filtering (across chromosomes)
 - ff_after_mq: Average fetal fraction after MethylQueen filtering (across chromosomes)
 - cpg_mean_coverage: Mean CpG coverage (average of raw_total_count)
 - snp_mean_coverage: Mean SNP coverage (average of current_depth)
-- chr{#}_s_inter: Inter-sample Z-score for each chromosome (from beta-zscore analysis)
+- chr{#}_s_inter: Inter-sample Z-score for each chromosome (from episcore analysis)
 """
 
 import pandas as pd
@@ -25,23 +25,23 @@ import sys
 console = Console()
 
 
-def read_zscore_file(zscore_file: Path) -> pd.DataFrame:
-    """Read Z-score TSV file and extract s_inter columns.
+def read_episcore_file(episcore_file: Path) -> pd.DataFrame:
+    """Read episcore TSV file and extract s_inter columns.
     
     Args:
-        zscore_file: Path to Z-score TSV file
+        episcore_file: Path to episcore TSV file
         
     Returns:
         DataFrame with s_inter columns for each chromosome
     """
-    console.print(f"[cyan]Reading Z-score file: {zscore_file}[/cyan]")
-    df = pd.read_csv(zscore_file, sep='\t')
+    console.print(f"[cyan]Reading episcore file: {episcore_file}[/cyan]")
+    df = pd.read_csv(episcore_file, sep='\t')
     
     # Extract only the s_inter columns (chr{#}_s_inter)
     s_inter_cols = [col for col in df.columns if col.endswith('_s_inter')]
     
     if not s_inter_cols:
-        console.print("[yellow]Warning: No s_inter columns found in Z-score file[/yellow]")
+        console.print("[yellow]Warning: No s_inter columns found in episcore file[/yellow]")
         return pd.DataFrame()
     
     console.print(f"[green]✓ Found {len(s_inter_cols)} s_inter columns[/green]")
@@ -147,10 +147,10 @@ def read_meta_file(meta_file: Path) -> pd.DataFrame:
     help='Sample identifier'
 )
 @click.option(
-    '--zscore',
+    '--episcore',
     required=True,
     type=click.Path(exists=True, path_type=Path),
-    help='Path to Z-score TSV file'
+    help='Path to episcore TSV file'
 )
 @click.option(
     '--beta-value',
@@ -184,7 +184,7 @@ def read_meta_file(meta_file: Path) -> pd.DataFrame:
 )
 def main(
     sample_id: str,
-    zscore: Path,
+    episcore: Path,
     beta_value: Path,
     snp_pileup: Path,
     snp_ff: Path,
@@ -203,8 +203,8 @@ def main(
         # Read all input files and extract metrics
         console.print("\n[bold]Step 1: Processing input files[/bold]")
         
-        # 1. Read Z-score file
-        zscore_df = read_zscore_file(zscore)
+        # 1. Read episcore file
+        episcore_df = read_episcore_file(episcore)
         
         # 2. Read beta value file
         cpg_mean_coverage = read_beta_value_file(beta_value)
@@ -226,10 +226,10 @@ def main(
             'snp_mean_coverage': snp_mean_coverage
         }
         
-        # Add s_inter columns from zscore
-        if not zscore_df.empty:
-            for col in zscore_df.columns:
-                output_data[col] = zscore_df[col].iloc[0]
+        # Add s_inter columns from episcore
+        if not episcore_df.empty:
+            for col in episcore_df.columns:
+                output_data[col] = episcore_df[col].iloc[0]
         
         # Create single-row DataFrame
         report_df = pd.DataFrame([output_data])

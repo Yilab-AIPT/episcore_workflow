@@ -3,7 +3,7 @@
 #
 # That python script reads <best_combo_csv> (one row per chromosome with the
 # best (threshold, recall)), pulls the per-chr aggregated beta values and
-# CpG counts that beta_to_zscore.py already wrote under
+# CpG counts that beta_to_episcore.py already wrote under
 # <output_base>/threshold_<t>_recall_<r>/, recomputes z_intra/z_inter/s_inter,
 # and writes <output_base>/best_combo/_{reference,analyze}_zscore.tsv.gz.
 #

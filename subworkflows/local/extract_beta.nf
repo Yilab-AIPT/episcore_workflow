@@ -1,5 +1,5 @@
 //
-// Calculate beta-zscore using clean bam and deconvolution result
+// Calculate episcore using clean bam and deconvolution result
 //
 
 include { SPLIT_BAM_BY_DECONV_RES } from '../../modules/local/split_bam_by_deconv_res/main.nf'

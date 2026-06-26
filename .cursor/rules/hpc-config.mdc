@@ -30,10 +30,10 @@ alwaysApply: false
 nextflow run main.nf \
   --input <samplesheet.csv> \
   --outdir <lustre_results_path> \
-  --step <split_bam|beta_zscore|grid_search|est_ff_from_bam|est_ff_from_pileup|perturbed_res>
+  --step <split_bam|episcore|grid_search|est_ff_from_bam|est_ff_from_pileup|perturbed_res>
 ```
 
-Panel profile supplies `--fasta`, `--cpg_list`, `--snp_list`, `--reference_beta_zscore_matrix`, thresholds.
+Panel profile supplies `--fasta`, `--cpg_list`, `--snp_list`, `--reference_episcore_matrix`, thresholds.
 
 ## Agent notes
 

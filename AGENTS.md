@@ -4,26 +4,26 @@
 
 **Episcore** is a Nextflow pipeline for **NIPT trisomy detection** using methylation **episcore** (beta → chromosome-level z-scores) plus **SNP-based fetal fraction (FF)** estimation. It sits in the AIPT 2.0 workflow at `/lustre1/cqyi/AIPT_2.0/workflow/episcore`.
 
-Upstream work (outside this repo) produces **clean BAMs** and **deconvolution read-probability tables**; this pipeline splits reads by deconv threshold, extracts methylation (MethylDackel), computes beta/z-scores against a reference matrix, estimates FF from SNPs, and emits per-sample reports.
+Upstream work (outside this repo) produces **clean BAMs** and **deconvolution read-probability tables**; this pipeline splits reads by deconv threshold, extracts methylation (MethylDackel), computes episcore against a reference matrix, estimates FF from SNPs, and emits per-sample reports.
 
 ## Entry points
 
 | `params.step` | Workflow | Samplesheet columns |
 |---------------|----------|---------------------|
 | `split_bam` | `NIPT` → `SPLIT_BAM` | `sample`, `clean_bam`, `deconv_res` |
-| `beta_zscore` | `NIPT` → `CALC_BETA_ZSCORE`, `ESTIMATE_FF`, `REPORT` | `sample`, `target_bam`, `background_bam` (or `clean_bam`+`deconv_res` for `split_bam`) |
+| `episcore` | `NIPT` → `CALC_EPISCORE`, `ESTIMATE_FF`, `REPORT` | `sample`, `target_bam`, `background_bam` (or `clean_bam`+`deconv_res` for `split_bam`) |
 | `grid_search` | `GRID_SEARCH` → `EXTRACT_BETA` | `sample`, `clean_bam`, `deconv_res` |
 | `est_ff_from_bam` | `SNP_EST_FF` → `SPLIT_BAM`, `BAM_TO_PILEUP`, `ESTIMATE_FF_HIGHER_PRECISION` | `sample`, `clean_bam`, `deconv_res` |
 | `est_ff_from_pileup` | `SNP_EST_FF` → `ESTIMATE_FF_HIGHER_PRECISION` | `sample`, `pileup` |
-| `perturbed_res` | `PERTURBED_RES` → `MERGE_DECONV_RES`, `REPLACE_DECONV_PROB`, `SPLIT_BAM_BY_DECONV_RES`, `CALC_BETA_ZSCORE`, `ESTIMATE_FF` | `sample`, `full_name`, `clean_bam`, `perturbed_res`, `original_res` |
+| `perturbed_res` | `PERTURBED_RES` → `MERGE_DECONV_RES`, `REPLACE_DECONV_PROB`, `SPLIT_BAM_BY_DECONV_RES`, `CALC_EPISCORE`, `ESTIMATE_FF` | `sample`, `full_name`, `clean_bam`, `perturbed_res`, `original_res` |
 
 `main.nf` routes by `params.step`: NIPT steps use `validateAndParseSamplesheet`; grid search uses `validateAndParseGridSearchParameters`; SNP FF steps (`est_ff_from_bam` / `est_ff_from_pileup`) use `validateAndParseSnpFFSamplesheet`; the methylation-perturbation step (`perturbed_res`) uses `validateAndParsePerturbedResSamplesheet` (`lib/`).
 
-The **NIPT FF** subworkflow (`subworkflows/local/estimate_ff.nf`, used by `beta_zscore` and `perturbed_res`) runs `BAM_TO_PILEUP` then branches on `params.ff_precision`: when set (e.g. `0.001`), it calls `ESTIMATE_FF_HIGHER_PRECISION` (`bin/estimate_ff_with_higher_precision.py`, passes `--ff-precision`); when `null` (default), it calls `SNP_TO_FF` (`bin/estimate_ff.py`, fixed-step grid search).
+The **NIPT FF** subworkflow (`subworkflows/local/estimate_ff.nf`, used by `episcore` and `perturbed_res`) runs `BAM_TO_PILEUP` then branches on `params.ff_precision`: when set (e.g. `0.001`), it calls `ESTIMATE_FF_HIGHER_PRECISION` (`bin/estimate_ff_with_higher_precision.py`, passes `--ff-precision`); when `null` (default), it calls `SNP_TO_FF` (`bin/estimate_ff.py`, fixed-step grid search).
 
-The **SNP FF** workflow (`workflows/snp_est_ff.nf`, entry `EST_FF`) is a standalone path focused only on SNP-based fetal fraction. It reuses `SPLIT_BAM` + `BAM_TO_PILEUP` to build a pileup (`est_ff_from_bam`) or consumes a pre-computed pileup (`est_ff_from_pileup`), then always runs `ESTIMATE_FF_HIGHER_PRECISION` (requires `--ff-precision`). It does **not** go through `CALC_BETA_ZSCORE` / `REPORT`.
+The **SNP FF** workflow (`workflows/snp_est_ff.nf`, entry `EST_FF`) is a standalone path focused only on SNP-based fetal fraction. It reuses `SPLIT_BAM` + `BAM_TO_PILEUP` to build a pileup (`est_ff_from_bam`) or consumes a pre-computed pileup (`est_ff_from_pileup`), then always runs `ESTIMATE_FF_HIGHER_PRECISION` (requires `--ff-precision`). It does **not** go through `CALC_EPISCORE` / `REPORT`.
 
-The **methylation-perturbation** workflow (`workflows/perturbed_res.nf`, entry `PERTURB`, `params.step=perturbed_res`) measures how perturbing read methylation status changes downstream episcore/FF. Per sample it (1) merges the (shared) `original_res` files via `MERGE_DECONV_RES`, then for each perturbation condition (`full_name`, `{sample}_*`) (2) overwrites the original `prob_class_1` with the perturbed read probabilities via `REPLACE_DECONV_PROB` (`bin/replace_deconv_prob.py`, left-join/coalesce on read `name`), (3) splits the single clean BAM with `SPLIT_BAM_BY_DECONV_RES` directly — **no `SAMTOOLS_MERGE` / `PICARD_MARKDUPLICATES`** since there is one BAM per sample — and (4) runs `CALC_BETA_ZSCORE` + `ESTIMATE_FF`. It does **not** go through `REPORT`. `meta = [id: full_name, sample: sample]`, so all per-condition outputs are keyed by `full_name`.
+The **methylation-perturbation** workflow (`workflows/perturbed_res.nf`, entry `PERTURB`, `params.step=perturbed_res`) measures how perturbing read methylation status changes downstream episcore/FF. Per sample it (1) merges the (shared) `original_res` files via `MERGE_DECONV_RES`, then for each perturbation condition (`full_name`, `{sample}_*`) (2) overwrites the original `prob_class_1` with the perturbed read probabilities via `REPLACE_DECONV_PROB` (`bin/replace_deconv_prob.py`, left-join/coalesce on read `name`), (3) splits the single clean BAM with `SPLIT_BAM_BY_DECONV_RES` directly — **no `SAMTOOLS_MERGE` / `PICARD_MARKDUPLICATES`** since there is one BAM per sample — and (4) runs `CALC_EPISCORE` + `ESTIMATE_FF`. It does **not** go through `REPORT`. `meta = [id: full_name, sample: sample]`, so all per-condition outputs are keyed by `full_name`.
 
 ## Directory map
 
@@ -31,13 +31,13 @@ The **methylation-perturbation** workflow (`workflows/perturbed_res.nf`, entry `
 main.nf                 # Top-level router (MAIN / SUB / EST_FF / PERTURB workflows)
 nextflow.config         # params, profiles, workDir, reports
 workflows/              # nipt.nf, grid_search.nf, snp_est_ff.nf, perturbed_res.nf
-subworkflows/local/     # split_bam, calc_beta_zscore, estimate_ff, report, extract_beta
+subworkflows/local/     # split_bam, calc_episcore, estimate_ff, report, extract_beta
 modules/local/          # Project-specific processes (incl. replace_deconv_prob)
 modules/nf-core/        # samtools, picard, methyldackel (vendored)
 lib/                    # Groovy samplesheet / grid-search / snp-ff / perturbed-res parsers
 bin/                    # Python CLI scripts invoked by processes
 conf/                   # Profile-specific params + executor/container config
-assets/                 # Reference FASTA, CpG/SNP lists, reference z-score matrices (not in git)
+assets/                 # Reference FASTA, CpG/SNP lists, reference episcore matrices (not in git)
 containers/             # Singularity images (gitignored); default Python env: common_tools.sif
 scripts/                # Offline grid-search / reference exploration (not part of main.nf)
 run_grid_search*.sh     # Batch nextflow launches on lustre
@@ -51,12 +51,12 @@ nextflow run /lustre1/cqyi/AIPT_2.0/workflow/episcore/main.nf \
   -profile early,alioth_slurm,singularity \
   --input /path/to/samplesheet.csv \
   --outdir /lustre1/cqyi/AIPT_2.0/results/episcore_output/<run_id> \
-  --step split_bam   # or beta_zscore | est_ff_from_bam | est_ff_from_pileup | perturbed_res
+  --step split_bam   # or episcore | est_ff_from_bam | est_ff_from_pileup | perturbed_res
 ```
 
 - **workDir** (fixed in `nextflow.config`): `/lustre1/cqyi/AIPT_2.0/tmp/episcore_workflow_tmp_dir`
 - **Profiles**: `early`, `early_240k`, `middle`, `filter_size`, `at_analyze`, `at_ref`, `grid_search`, `perturbed_res`, `test`, plus executors `alioth_slurm`, `alioth_local`, `dev`, `singularity`
-- Panel variants differ mainly in `cpg_list`, `snp_list`, `reference_beta_zscore_matrix` under `conf/*.config`
+- Panel variants differ mainly in `cpg_list`, `snp_list`, `reference_episcore_matrix` under `conf/*.config`
 - **Containers**: local/Python processes use `containers/common_tools.sif` (default Python environment for `bin/*.py`); `METHYLDACKEL.*` → `methyldackel.sif`, `PICARD_*` → `picard_3.4.0.sif` (see `conf/alioth_slurm.config`)
 - **`ff_precision`**: optional on NIPT (`--ff_precision 0.001`); when set, `ESTIMATE_FF` uses higher-precision FF estimation instead of `estimate_ff.py`
 
@@ -64,7 +64,7 @@ nextflow run /lustre1/cqyi/AIPT_2.0/workflow/episcore/main.nf \
 
 - **meta**: `[id: sample]` from samplesheet `sample` column (for `perturbed_res`: `[id: full_name, sample: sample]`)
 - **split_bam input**: `[meta, clean_bam, deconv_res]`
-- **beta_zscore input**: `[meta, target_bam, background_bam]`
+- **episcore input**: `[meta, target_bam, background_bam]`
 - **est_ff_from_bam input**: `[meta, clean_bam, deconv_res]`
 - **est_ff_from_pileup input**: `[meta, pileup]`
 - **perturbed_res input**: `[meta, clean_bam, perturbed_res, original_res]` (meta carries `id`=full_name + `sample`)

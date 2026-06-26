@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Beta to Z-score Conversion for Single Sample Trisomy Detection
+Beta to episcore Conversion for Single Sample Trisomy Detection
 
 This script processes methylation beta values for a single sample to calculate
 chromosome-level statistics and Z-scores for trisomy detection.
@@ -391,10 +391,10 @@ def build_output_dataframe(
     help='Path to gzipped TSV beta value file for single sample'
 )
 @click.option(
-    '--reference-beta-zscore-matrix',
+    '--reference-episcore-matrix',
     type=click.Path(exists=True),
     default=None,
-    help='Path to reference beta z-score matrix (TSV) with chr*_s_intra columns (optional)'
+    help='Path to reference episcore matrix (TSV) with chr*_s_intra columns (optional)'
 )
 @click.option(
     '--output-prefix',
@@ -440,7 +440,7 @@ def build_output_dataframe(
 )
 def main(
     beta_value: str,
-    reference_beta_zscore_matrix: Optional[str],
+    reference_episcore_matrix: Optional[str],
     output_prefix: str,
     depth: Optional[int],
     cpg_list: Optional[str],
@@ -463,12 +463,12 @@ def main(
     
     The output is a TSV file with one row containing all calculated metrics.
     
-    If --reference-beta-zscore-matrix is not provided, only s_intra is calculated.
-    If --reference-beta-zscore-matrix is provided, both s_intra and s_inter are calculated.
+    If --reference-episcore-matrix is not provided, only s_intra is calculated.
+    If --reference-episcore-matrix is provided, both s_intra and s_inter are calculated.
     
     Example (without reference):
     \b
-        beta_to_zscore.py \\
+        beta_to_episcore.py \\
             --beta-value sample.beta.tsv.gz \\
             --output sample_zscore.tsv.gz \\
             --depth 100 \\
@@ -476,17 +476,17 @@ def main(
     
     Example (with reference):
     \b
-        beta_to_zscore.py \\
+        beta_to_episcore.py \\
             --beta-value sample.beta.tsv.gz \\
-            --reference-beta-zscore-matrix reference_matrix.tsv \\
+            --reference-episcore-matrix reference_matrix.tsv \\
             --output sample_zscore.tsv.gz \\
             --depth 100 \\
             --cpg-list cpg_list.txt
     """
-    console.rule("[bold blue]Beta to Z-score Conversion for Single Sample")
+    console.rule("[bold blue]Beta to episcore Conversion for Single Sample")
     console.print(f"\n[bold]Input Parameters:[/bold]")
     console.print(f"  Beta value file: {beta_value}")
-    console.print(f"  Reference matrix: {reference_beta_zscore_matrix if reference_beta_zscore_matrix else 'None (s_intra only)'}")
+    console.print(f"  Reference matrix: {reference_episcore_matrix if reference_episcore_matrix else 'None (s_intra only)'}")
     console.print(f"  Output prefix: {output_prefix}")
     console.print(f"  Depth threshold: {depth if depth else 'None'}")
     console.print(f"  CpG list file: {cpg_list if cpg_list else 'None'}")
@@ -576,12 +576,12 @@ def main(
         hyper_z_inter = None
         s_inter = None
         
-        if reference_beta_zscore_matrix:
+        if reference_episcore_matrix:
             console.print("\n[bold cyan]Step 4: Calculating inter-sample Z-scores (s_inter)[/bold cyan]")
-            console.print(f"  Loading reference matrix: {reference_beta_zscore_matrix}")
+            console.print(f"  Loading reference matrix: {reference_episcore_matrix}")
             
             # Load reference matrix
-            ref_matrix = pd.read_csv(reference_beta_zscore_matrix, sep='\t')
+            ref_matrix = pd.read_csv(reference_episcore_matrix, sep='\t')
             console.print(f"[green]✓[/green] Loaded reference matrix: {len(ref_matrix)} samples")
             
             # Calculate s_inter using reference
@@ -595,7 +595,7 @@ def main(
             console.print("\n[yellow]Note:[/yellow] No reference matrix provided, skipping s_inter calculation")
         
         # Build output DataFrame
-        step_num = 5 if reference_beta_zscore_matrix else 4
+        step_num = 5 if reference_episcore_matrix else 4
         console.print(f"\n[bold cyan]Step {step_num}: Building output DataFrame[/bold cyan]")
         
         output_df = build_output_dataframe(

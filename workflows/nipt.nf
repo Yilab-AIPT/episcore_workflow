@@ -4,7 +4,7 @@
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 include { SPLIT_BAM } from '../subworkflows/local/split_bam.nf'
-include { CALC_BETA_ZSCORE } from '../subworkflows/local/calc_beta_zscore.nf'
+include { CALC_EPISCORE } from '../subworkflows/local/calc_episcore.nf'
 include { ESTIMATE_FF } from '../subworkflows/local/estimate_ff.nf'
 include { REPORT } from '../subworkflows/local/report.nf'
 
@@ -40,12 +40,12 @@ workflow NIPT {
         ch_splitted_bam = channel.empty().mix(ch_samplesheet)
     }
 
-    // Calculate beta-zscore and SNP-est-ff
-    if (params.step in ['split_bam', 'beta_zscore']) {
-        CALC_BETA_ZSCORE(ch_splitted_bam)
-        CALC_BETA_ZSCORE.out.zscore
-            .set { ch_beta_zscore }
-        CALC_BETA_ZSCORE.out.beta_value
+    // Calculate episcore and SNP-est-ff
+    if (params.step in ['split_bam', 'episcore']) {
+        CALC_EPISCORE(ch_splitted_bam)
+        CALC_EPISCORE.out.episcore
+            .set { ch_episcore }
+        CALC_EPISCORE.out.beta_value
             .set { ch_beta_value }
 
         ESTIMATE_FF(ch_splitted_bam)
@@ -54,16 +54,16 @@ workflow NIPT {
         ESTIMATE_FF.out.snp_ff
             .set { ch_snp_ff }
     } else {
-        ch_beta_zscore = channel.empty()
+        ch_episcore = channel.empty()
         ch_beta_value = channel.empty()
         ch_snp_pileup = channel.empty()
         ch_snp_ff = channel.empty()
     }
 
     // Generate final report
-    if (params.step in ['split_bam', 'beta_zscore']) {
+    if (params.step in ['split_bam', 'episcore']) {
         REPORT(
-            ch_beta_zscore,
+            ch_episcore,
             ch_beta_value,
             ch_snp_pileup,
             ch_snp_ff

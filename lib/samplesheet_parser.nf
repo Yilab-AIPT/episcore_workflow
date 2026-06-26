@@ -3,7 +3,7 @@
 /*
 Parses and validates the input samplesheet based on the requested entry step.
 @param samplesheet_path Path to the samplesheet CSV file.
-@param step             The current entry point (split_bam | beta_zscore).
+@param step             The current entry point (split_bam | episcore).
 @return                 A Channel structure: [ meta, [files...] ]
 */
 
@@ -12,7 +12,7 @@ def validateAndParseSamplesheet(samplesheet_path, step) {
     // 1. Define required columns for different entry steps
     def required_columns = [
         'split_bam' : ['sample', 'clean_bam', 'deconv_res'],
-        'beta_zscore' : ['sample', 'target_bam', 'background_bam']
+        'episcore' : ['sample', 'target_bam', 'background_bam']
     ]
 
     // Validate if the provided step is a valid entry point
@@ -36,8 +36,8 @@ def validateAndParseSamplesheet(samplesheet_path, step) {
             // 2.3 Dispatch parsing logic based on the step
             if (step == 'split_bam') {
                 return parseSplitBamRow(row, meta)
-            } else if (step == 'beta_zscore') {
-                return parseBetaZscoreRow(row, meta)
+            } else if (step == 'episcore') {
+                return parseEpiscoreRow(row, meta)
             } else {
                 return null
             }
@@ -54,9 +54,9 @@ def parseSplitBamRow(row, meta) {
     return [ meta, clean_bam, deconv_res ]
 }
 
-// Parse row for Beta Z-score Step
+// Parse row for Episcore Step
 // Returns: [ meta, target_bam, background_bam ]
-def parseBetaZscoreRow(row, meta) {
+def parseEpiscoreRow(row, meta) {
     def target_bam = file(row.target_bam, checkIfExists: true)
     def background_bam = file(row.background_bam, checkIfExists: true)
     return [ meta, target_bam, background_bam ]

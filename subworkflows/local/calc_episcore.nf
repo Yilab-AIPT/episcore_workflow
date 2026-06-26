@@ -1,5 +1,5 @@
 //
-// Calculate beta-zscore using clean bam and deconvolution result
+// Calculate episcore using clean bam and deconvolution result
 //
 
 include { SAMTOOLS_INDEX as SAMTOOLS_INDEX_TARGET } from '../../modules/nf-core/samtools/index/main.nf'
@@ -7,9 +7,9 @@ include { SAMTOOLS_INDEX as SAMTOOLS_INDEX_BACKGROUND } from '../../modules/nf-c
 include { METHYLDACKEL_EXTRACT as METHYLDACKEL_EXTRACT_TARGET } from '../../modules/nf-core/methyldackel/extract/main.nf'
 include { METHYLDACKEL_EXTRACT as METHYLDACKEL_EXTRACT_BACKGROUND } from '../../modules/nf-core/methyldackel/extract/main.nf'
 include { EXTRACT_BETA_VALUE } from '../../modules/local/extract_beta_value/main.nf'
-include { BETA_TO_ZSCORE } from '../../modules/local/beta_to_zscore/main.nf'
+include { BETA_TO_EPISCORE } from '../../modules/local/beta_to_episcore/main.nf'
 
-workflow CALC_BETA_ZSCORE {
+workflow CALC_EPISCORE {
     take:
     ch_samplesheet // channel: samplesheet with columns ['sample', 'target_bam', 'background_bam']
 
@@ -82,19 +82,19 @@ workflow CALC_BETA_ZSCORE {
     EXTRACT_BETA_VALUE.out.beta_value
         .set { ch_beta_value }
 
-    // Calculate beta-zscore
-    def ref_matrix     = params.reference_beta_zscore_matrix ? file(params.reference_beta_zscore_matrix) : []
+    // Calculate episcore
+    def ref_matrix     = params.reference_episcore_matrix ? file(params.reference_episcore_matrix) : []
     
-    BETA_TO_ZSCORE(
+    BETA_TO_EPISCORE(
         ch_beta_value,
         ref_matrix,
         file(params.cpg_list),
         params.beta_depth_threshold
     )
-    BETA_TO_ZSCORE.out.zscore
-        .set { ch_zscore }
+    BETA_TO_EPISCORE.out.episcore
+        .set { ch_episcore }
 
     emit:
     beta_value = ch_beta_value
-    zscore = ch_zscore
+    episcore   = ch_episcore
 }

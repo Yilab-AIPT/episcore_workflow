@@ -19,7 +19,7 @@
 #     best_combo_csv : CSV with columns chr,threshold,recall (extra columns ignored)
 #     output_base    : Directory containing threshold_<t>_recall_<r>/ subdirs
 #                      with _analyze_zscore.tsv.gz and _reference_zscore.tsv.gz
-#                      (i.e. the output dir from beta_to_zscore.py).
+#                      (i.e. the output dir from beta_to_episcore.py).
 #
 # Outputs (under <output_base>/best_combo/):
 #     _reference_zscore.tsv.gz

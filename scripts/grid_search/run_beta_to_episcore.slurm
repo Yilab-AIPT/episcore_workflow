@@ -5,11 +5,11 @@
 #SBATCH -o logs/%x.log
 #SBATCH -e logs/%x.log
 
-# Run beta_to_zscore.py for one (threshold, recall) combination.
+# Run beta_to_episcore.py for one (threshold, recall) combination.
 #
 # Usage:
 #     sbatch --job-name=b2z_t<thres>_r<recall> \
-#            run_beta_to_zscore.slurm <threshold> <recall>
+#            run_beta_to_episcore.slurm <threshold> <recall>
 #
 # Inputs:
 #     reference dir : <RESULT_BASE>/threshold_<thres>/early_ref_n_17
@@ -26,10 +26,10 @@
 
 set -euo pipefail
 
-threshold=${1:?Usage: sbatch run_beta_to_zscore.slurm <threshold> <recall>}
-recall=${2:?Usage: sbatch run_beta_to_zscore.slurm <threshold> <recall>}
+threshold=${1:?Usage: sbatch run_beta_to_episcore.slurm <threshold> <recall>}
+recall=${2:?Usage: sbatch run_beta_to_episcore.slurm <threshold> <recall>}
 
-# Run from the directory containing beta_to_zscore.py (where sbatch was called).
+# Run from the directory containing beta_to_episcore.py (where sbatch was called).
 SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 cd "$SCRIPT_DIR"
 
@@ -65,7 +65,7 @@ echo "  cpus          : ${SLURM_CPUS_PER_TASK:-32}"
 
 singularity exec -B /lustre1,/lustre2,/appsnew \
     /lustre1/cqyi/syfan/images/common_tools.sif \
-    python3 beta_to_zscore.py \
+    python3 beta_to_episcore.py \
         --reference-beta-value-dir "$REF_DIR" \
         --analyze-beta-value-dir   "$ANALYZE_DIR" \
         --output-prefix            "${OUT_DIR}/" \

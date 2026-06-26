@@ -487,7 +487,7 @@ def main(
     ncpus: int,
     no_gzip: bool,
 ) -> None:
-    """Multi-sample beta-to-zscore conversion for trisomy detection.
+    """Multi-sample beta-to-episcore conversion for trisomy detection.
 
     For each sample in --reference-beta-value-dir and --analyze-beta-value-dir:
 

@@ -6,7 +6,7 @@
 include { MERGE_DECONV_RES } from '../modules/local/merge_deconv_res/main.nf'
 include { REPLACE_DECONV_PROB } from '../modules/local/replace_deconv_prob/main.nf'
 include { SPLIT_BAM_BY_DECONV_RES } from '../modules/local/split_bam_by_deconv_res/main.nf'
-include { CALC_BETA_ZSCORE } from '../subworkflows/local/calc_beta_zscore.nf'
+include { CALC_EPISCORE } from '../subworkflows/local/calc_episcore.nf'
 include { ESTIMATE_FF } from '../subworkflows/local/estimate_ff.nf'
 
 /*
@@ -101,11 +101,11 @@ workflow PERTURBED_RES {
             seed: "sample,target_bam,background_bam\n"
         )
 
-    // 5. Downstream: beta/z-score (episcore) and SNP-based fetal fraction.
-    CALC_BETA_ZSCORE(ch_splitted_bam)
-    CALC_BETA_ZSCORE.out.zscore
-        .set { ch_beta_zscore }
-    CALC_BETA_ZSCORE.out.beta_value
+    // 5. Downstream: episcore and SNP-based fetal fraction.
+    CALC_EPISCORE(ch_splitted_bam)
+    CALC_EPISCORE.out.episcore
+        .set { ch_episcore }
+    CALC_EPISCORE.out.beta_value
         .set { ch_beta_value }
 
     ESTIMATE_FF(ch_splitted_bam)
@@ -117,7 +117,7 @@ workflow PERTURBED_RES {
     emit:
     splitted_bam = ch_splitted_bam
     beta_value   = ch_beta_value
-    zscore       = ch_beta_zscore
+    episcore     = ch_episcore
     snp_pileup   = ch_snp_pileup
     snp_ff       = ch_snp_ff
 }

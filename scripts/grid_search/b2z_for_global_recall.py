@@ -6,7 +6,7 @@ For each chromosome, a "best threshold" (under a single shared recall) is
 read from a CSV. Unlike ``b2z_for_best_combo.py`` (which recomputes
 ``z_intra`` / ``z_inter`` from beta values and counts), this script directly
 copies the per-chromosome columns (``chr{n}_*``) out of each combo's existing
-``beta_to_zscore.py`` output, because the values are already the ones we want
+``beta_to_episcore.py`` output, because the values are already the ones we want
 to keep -- ``recall`` is fixed across chromosomes so the per-sample z_intra
 mean/std baseline is consistent.
 
@@ -17,13 +17,13 @@ Inputs:
     --output-base    : Directory containing the
                         ``threshold_{t}_recall_{r}/_analyze_zscore.tsv.gz`` and
                         ``_reference_zscore.tsv.gz`` files produced by
-                        ``beta_to_zscore.py``.
+                        ``beta_to_episcore.py``.
 
 Outputs (under ``--output-base/global_recall/`` by default):
     _reference_zscore.tsv.gz
     _analyze_zscore.tsv.gz
 
-The output schemas exactly match those of ``beta_to_zscore.py``.
+The output schemas exactly match those of ``beta_to_episcore.py``.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ import click
 import pandas as pd
 from rich.console import Console
 
-from beta_to_zscore import _write_tsv
+from beta_to_episcore import _write_tsv
 
 console = Console()
 
@@ -165,7 +165,7 @@ def _stitch_one_side(
     type=click.Path(exists=True, file_okay=False, dir_okay=True),
     help=(
         "Directory containing the threshold_{t}_recall_{r}/ subdirectories "
-        "produced by beta_to_zscore.py."
+        "produced by beta_to_episcore.py."
     ),
 )
 @click.option(
@@ -195,7 +195,7 @@ def main(
        chrs that pick that combo. No recomputation is performed.
     3. Write global_recall/_reference_zscore.tsv.gz and
        global_recall/_analyze_zscore.tsv.gz with the same schema as
-       beta_to_zscore.py's outputs.
+       beta_to_episcore.py's outputs.
     """
     console.rule("[bold blue]Global-recall z-score stitching")
 

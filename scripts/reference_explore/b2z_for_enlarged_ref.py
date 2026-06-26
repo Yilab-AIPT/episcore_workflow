@@ -10,7 +10,7 @@ Goal:
 
 Inputs:
     --combo-dir : directory containing ``_analyze_zscore.tsv.gz`` and
-                  ``_reference_zscore.tsv.gz`` produced by ``beta_to_zscore.py``
+                  ``_reference_zscore.tsv.gz`` produced by ``beta_to_episcore.py``
                   for the fixed (threshold, recall) combo.
     --meta-csv  : sample-level metadata. Must provide
                   ``sample, label, ref_type, set, ff_before_mq``.
@@ -515,7 +515,7 @@ def _build_eval_weights(
     type=click.Path(exists=True, file_okay=False, dir_okay=True),
     help=(
         "Directory containing the source _analyze_zscore.tsv.gz and "
-        "_reference_zscore.tsv.gz produced by beta_to_zscore.py for the "
+        "_reference_zscore.tsv.gz produced by beta_to_episcore.py for the "
         "fixed (threshold, recall) combo (default 0.5 / 0.65)."
     ),
 )
@@ -1158,7 +1158,7 @@ def _run_isolated_mode(
 
 
 # ---------------------------------------------------------------------------
-# Small parser for chromosome specs (mirrors beta_to_zscore.py's behaviour)
+# Small parser for chromosome specs (mirrors beta_to_episcore.py's behaviour)
 # ---------------------------------------------------------------------------
 
 def _parse_chr_spec(spec: str) -> List[str]:

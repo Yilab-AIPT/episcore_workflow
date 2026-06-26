@@ -21,16 +21,16 @@ def meta = [id: row.sample]
 return [ meta, file(row.clean_bam, checkIfExists: true), ... ]
 
 // Process I/O
-process BETA_TO_ZSCORE {
+process BETA_TO_EPISCORE {
     tag "$meta.id"
     input:
     tuple val(meta), path(beta_value)
     output:
-    tuple val(meta), path("*_zscore.tsv"), emit: zscore
+    tuple val(meta), path("*_zscore.tsv"), emit: episcore
     script:
-    def ref_matrix_arg = reference_beta_zscore_matrix?.name != 'null' ? "--reference-beta-zscore-matrix ${reference_beta_zscore_matrix}" : ""
+    def ref_matrix_arg = reference_episcore_matrix?.name != 'null' ? "--reference-episcore-matrix ${reference_episcore_matrix}" : ""
     """
-    beta_to_zscore.py --beta-value ${beta_value} --output-prefix ${meta.id} ...
+    beta_to_episcore.py --beta-value ${beta_value} --output-prefix ${meta.id} ...
     """
 }
 ```
@@ -50,4 +50,4 @@ process BETA_TO_ZSCORE {
 
 - Join on meta: `join(..., by: 0)` — first element is `meta` map
 - `groupTuple` + `branch` pattern for multiple BAMs/deconv files per sample (see `split_bam.nf`)
-- Do not break emit names consumed upstream (`splitted_bam`, `zscore`, `beta_value`, etc.)
+- Do not break emit names consumed upstream (`splitted_bam`, `episcore`, `beta_value`, etc.)

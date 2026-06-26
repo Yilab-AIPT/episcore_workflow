@@ -2,7 +2,7 @@ process GENERATE_REPORT {
     tag "$meta.id"
     
     input:
-    tuple val(meta), path(zscore), path(beta_value), path(snp_pileup), path(snp_ff)
+    tuple val(meta), path(episcore), path(beta_value), path(snp_pileup), path(snp_ff)
     path(meta_file)
     
     output:
@@ -13,7 +13,7 @@ process GENERATE_REPORT {
     """
     generate_report.py \\
         --sample-id ${meta.id} \\
-        --zscore ${zscore} \\
+        --episcore ${episcore} \\
         --beta-value ${beta_value} \\
         --snp-pileup ${snp_pileup} \\
         --snp-ff ${snp_ff} \\

@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-# Submit beta_to_zscore.py SLURM jobs across the (threshold x recall) grid.
+# Submit beta_to_episcore.py SLURM jobs across the (threshold x recall) grid.
 #
 #   thresholds : 0.1, 0.33, 0.5, 0.67, 0.9       (5 values)
 #   recalls    : 0.01, 0.02, ..., 0.99           (99 values)
@@ -39,7 +39,7 @@ done
 WORKDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 cd "$WORKDIR"
 
-SLURM_SCRIPT=run_beta_to_zscore_220k.slurm
+SLURM_SCRIPT=run_beta_to_episcore_220k.slurm
 RESULT_BASE=/lustre1/cqyi/AIPT_2.0/results/episcore_output/20260525-grid_search_240k_panel_240k_model
 CPG_DIR=/lustre1/cqyi/AIPT_2.0/data/meta/episcore/20260525-grid_search_240k_panel_240k_model/recall_list_220k
 

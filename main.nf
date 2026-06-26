@@ -60,7 +60,7 @@ workflow PERTURB {
 */
 workflow {
 
-    if (params.step in ['split_bam', 'beta_zscore']) {
+    if (params.step in ['split_bam', 'episcore']) {
         // Validate and parse samplesheet
         ch_samplesheet = validateAndParseSamplesheet(params.input, params.step)
 

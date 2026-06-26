@@ -37,7 +37,7 @@ def main(...):
 
 - Output naming: `{output_prefix}_<artifact>.tsv` or `.tsv.gz` to match Nextflow `path("*_zscore.tsv")` globs
 - Accept paths from Nextflow; use `Path` and validate with `exists=True` where appropriate
-- Chromosome specs: reuse `parse_chr_list` style (`chr1`, ranges `1-22`, comma lists) in `beta_to_zscore.py`
+- Chromosome specs: reuse `parse_chr_list` style (`chr1`, ranges `1-22`, comma lists) in `beta_to_episcore.py`
 - Use `set -euo pipefail` in shell fragments only in `.nf` files, not in Python
 
 ## Editing checklist

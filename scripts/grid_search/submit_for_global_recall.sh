@@ -3,7 +3,7 @@
 #
 # That python script reads <best_combo_csv> (one row per chromosome with the
 # best threshold under a shared recall), copies the per-chr columns
-# (chr{n}_*) that beta_to_zscore.py already wrote under
+# (chr{n}_*) that beta_to_episcore.py already wrote under
 # <output_base>/threshold_<t>_recall_<r>/, and stitches them into
 # <output_base>/global_recall/_{reference,analyze}_zscore.tsv.gz.
 #

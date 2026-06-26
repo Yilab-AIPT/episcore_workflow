@@ -4,7 +4,7 @@ Best-combo per-chromosome Z-score recomputation.
 
 For each chromosome, a "best (threshold, recall) combination" is read from a
 CSV. This script picks up the per-chromosome aggregated beta values and CpG
-counts that ``beta_to_zscore.py`` already wrote for those combinations, then
+counts that ``beta_to_episcore.py`` already wrote for those combinations, then
 recomputes per-sample ``hypo_z_intra`` / ``hyper_z_intra`` (across chromosomes
 using each chr's best combo), the reference statistics, and finally
 ``hypo_z_inter`` / ``hyper_z_inter`` / ``s_inter`` for every analyze sample.
@@ -15,13 +15,13 @@ Inputs:
     --output-base    : Directory containing the
                         ``threshold_{t}_recall_{r}/_analyze_zscore.tsv.gz`` and
                         ``_reference_zscore.tsv.gz`` files produced by
-                        ``beta_to_zscore.py``.
+                        ``beta_to_episcore.py``.
 
 Outputs (under ``--output-base/best_combo/`` by default):
     _reference_zscore.tsv.gz
     _analyze_zscore.tsv.gz
 
-The output schemas exactly match those of ``beta_to_zscore.py``.
+The output schemas exactly match those of ``beta_to_episcore.py``.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ import numpy as np
 import pandas as pd
 from rich.console import Console
 
-from beta_to_zscore import (
+from beta_to_episcore import (
     _build_dataframe,
     _write_tsv,
     calculate_s_inter_from_stats,
@@ -53,7 +53,7 @@ console = Console()
 def _format_combo_dirname(threshold: float, recall: float) -> str:
     """Format a (threshold, recall) combo as ``threshold_{t}_recall_{r}``.
 
-    ``%g`` matches the convention used by ``submit_beta_to_zscore.sh`` (it strips
+    ``%g`` matches the convention used by ``submit_beta_to_episcore.sh`` (it strips
     trailing zeros, e.g. ``0.30`` -> ``0.3``) so the directory names line up
     with the ones already on disk.
     """
@@ -274,7 +274,7 @@ def _assemble_best_combo_arrays(
     type=click.Path(exists=True, file_okay=False, dir_okay=True),
     help=(
         "Directory containing the threshold_{t}_recall_{r}/ subdirectories "
-        "produced by beta_to_zscore.py."
+        "produced by beta_to_episcore.py."
     ),
 )
 @click.option(
@@ -380,7 +380,7 @@ def main(
         console.print("[green]OK[/green] s_inter computed for all analyze samples")
 
         console.print("\n[bold cyan]Step 4: Sorting and writing outputs[/bold cyan]")
-        # Sort by sample for deterministic output ordering, mirroring beta_to_zscore.py.
+        # Sort by sample for deterministic output ordering, mirroring beta_to_episcore.py.
         ref_order = sorted(range(len(reference_samples)), key=lambda i: reference_samples[i])
         an_order = sorted(range(n_analyze), key=lambda i: analyze_samples[i])
 

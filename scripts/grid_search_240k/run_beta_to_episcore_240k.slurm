@@ -5,11 +5,11 @@
 #SBATCH -o logs/%x.log
 #SBATCH -e logs/%x.log
 
-# Run beta_to_zscore.py for one (threshold, recall) combination.
+# Run beta_to_episcore.py for one (threshold, recall) combination.
 #
 # Usage:
 #     sbatch --job-name=b2z_t<thres>_r<recall> \
-#            run_beta_to_zscore.slurm <threshold> <recall>
+#            run_beta_to_episcore.slurm <threshold> <recall>
 #
 # Inputs:
 #     reference dir : <RESULT_BASE>/threshold_<thres>/early_ref_n_17
@@ -26,22 +26,22 @@
 
 set -euo pipefail
 
-threshold=${1:?Usage: sbatch run_beta_to_zscore.slurm <threshold> <recall>}
-recall=${2:?Usage: sbatch run_beta_to_zscore.slurm <threshold> <recall>}
+threshold=${1:?Usage: sbatch run_beta_to_episcore.slurm <threshold> <recall>}
+recall=${2:?Usage: sbatch run_beta_to_episcore.slurm <threshold> <recall>}
 
-# Run from the directory containing beta_to_zscore.py (where sbatch was called).
+# Run from the directory containing beta_to_episcore.py (where sbatch was called).
 SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 cd "$SCRIPT_DIR"
 
 mkdir -p logs
 
 RESULT_BASE=/lustre1/cqyi/AIPT_2.0/results/episcore_output/20260525-grid_search_240k_panel_240k_model
-CPG_DIR=/lustre1/cqyi/AIPT_2.0/data/meta/episcore/20260525-grid_search_240k_panel_240k_model/recall_list_220k
+CPG_DIR=/lustre1/cqyi/AIPT_2.0/data/meta/episcore/20260525-grid_search_240k_panel_240k_model/recall_list_240k
 
-REF_DIR="${RESULT_BASE}/threshold_${threshold}/220k_early_ref_n_16"
-ANALYZE_DIR="${RESULT_BASE}/threshold_${threshold}/220k_analyze_n_26"
-CPG_LIST="${CPG_DIR}/220k_cpg_recall_${recall}.txt"
-OUT_DIR="${RESULT_BASE}/output_220k/threshold_${threshold}_recall_${recall}"
+REF_DIR="${RESULT_BASE}/threshold_${threshold}/240k_early_ref_n_16"
+ANALYZE_DIR="${RESULT_BASE}/threshold_${threshold}/240k_analyze_n_26"
+CPG_LIST="${CPG_DIR}/240k_cpg_recall_${recall}.txt"
+OUT_DIR="${RESULT_BASE}/output_240k/threshold_${threshold}_recall_${recall}"
 
 for path in "$REF_DIR" "$ANALYZE_DIR"; do
     if [ ! -d "$path" ]; then
@@ -65,7 +65,7 @@ echo "  cpus          : ${SLURM_CPUS_PER_TASK:-32}"
 
 singularity exec -B /lustre1,/lustre2,/appsnew \
     /lustre1/cqyi/syfan/images/common_tools.sif \
-    python3 beta_to_zscore.py \
+    python3 beta_to_episcore.py \
         --reference-beta-value-dir "$REF_DIR" \
         --analyze-beta-value-dir   "$ANALYZE_DIR" \
         --output-prefix            "${OUT_DIR}/" \

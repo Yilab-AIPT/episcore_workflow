@@ -5,17 +5,17 @@
 #SBATCH -o logs/%x.log
 #SBATCH -e logs/%x.log
 
-# Run beta_to_zscore.py for one recall threshold.
+# Run beta_to_episcore.py for one recall threshold.
 #
 # Usage:
-#     sbatch --job-name=b2z_recall_<recall> run_beta_to_zscore.slurm <recall>
+#     sbatch --job-name=b2z_recall_<recall> run_beta_to_episcore.slurm <recall>
 #
 # The job name is also used to name the log file (logs/%x.log), so be sure to
 # pass --job-name when submitting (submit.sh handles that automatically).
 
 set -euo pipefail
 
-recall=${1:?Usage: sbatch run_beta_to_zscore.slurm <recall>}
+recall=${1:?Usage: sbatch run_beta_to_episcore.slurm <recall>}
 
 WORKDIR=/lustre1/cqyi/AIPT_2.0/tests/episcore/grid_search
 cd "$WORKDIR"
@@ -39,7 +39,7 @@ echo "  cpus          : ${SLURM_CPUS_PER_TASK:-32}"
 
 singularity exec -B /lustre1,/lustre2,/appsnew \
     /lustre1/cqyi/syfan/images/common_tools.sif \
-    python3 beta_to_zscore.py \
+    python3 beta_to_episcore.py \
         --reference-beta-value-dir "$REF_DIR" \
         --analyze-beta-value-dir   "$ANALYZE_DIR" \
         --output-prefix            "output_chrX/recall_${recall}" \
