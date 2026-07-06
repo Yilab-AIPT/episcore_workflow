@@ -42,6 +42,8 @@ Outputs (under ``<output-base>/randomly_select_ref_40/repeat_{i}/``):
     reference_samples.txt        the 40 drawn reference samples
     best_combo_episcore.csv      chr, threshold, recall (+ has_target)
     best_combo_zscore.csv        chr, threshold, recall (+ has_target)
+    best_reference_matrix.tsv    per-chr ref mean/std for episcore + zscore normalization
+    best_ezscore_ref_20_matrix.tsv  per-chr mean/std of (zscore+episcore) over ezscore ref
     metrics.tsv                  score x set -> mcc/tp/tn/fp/fn (+min_recall)
     scores.tsv                   per analyze sample: episcore/zscore/ezscore per chr
 
@@ -217,6 +219,76 @@ def compute_zscore(percentage: np.ndarray, ref_idx: np.ndarray) -> np.ndarray:
     std_safe = np.where(std > 0, std, np.nan)[:, :, None]
     with np.errstate(divide="ignore", invalid="ignore"):
         return (percentage - mean[:, :, None]) / std_safe
+
+
+def _sample_mean_std(values: np.ndarray) -> Tuple[float, float]:
+    """Mean/std over a 1-D sample slice (NaN-safe; mean defaults to 0)."""
+    with np.errstate(invalid="ignore"):
+        mean = np.nanmean(values)
+        std = np.nanstd(values, ddof=0)
+    mean = float(mean) if np.isfinite(mean) else 0.0
+    std = float(std) if np.isfinite(std) else 0.0
+    return mean, std
+
+
+def build_reference_matrix(
+    hypo_z: np.ndarray,
+    hyper_z: np.ndarray,
+    percentage: np.ndarray,
+    ep_combos: List[Tuple[float, float]],
+    z_combos: List[Tuple[float, float]],
+    ep_best: Dict[str, Tuple[float, float]],
+    z_best: Dict[str, Tuple[float, float]],
+    ref_idx: np.ndarray,
+) -> pd.DataFrame:
+    """Per-chr reference mean/std at the best episcore/zscore combos.
+
+    Records the values needed to normalize a new sample's hypo/hyper z_intra
+    (episcore) and chromosome percentage (zscore) against this repeat's
+    reference draw.
+    """
+    ep_combo_index = {c: i for i, c in enumerate(ep_combos)}
+    z_combo_index = {c: i for i, c in enumerate(z_combos)}
+    rows = []
+    for hi, chrom in enumerate(CHR_LIST):
+        ep_ci = ep_combo_index[ep_best[chrom]]
+        z_ci = z_combo_index[z_best[chrom]]
+        hypo_mean, hypo_std = _sample_mean_std(hypo_z[ep_ci, hi, ref_idx])
+        hyper_mean, hyper_std = _sample_mean_std(hyper_z[ep_ci, hi, ref_idx])
+        pct_mean, pct_std = _sample_mean_std(percentage[z_ci, hi, ref_idx])
+        rows.append(
+            {
+                "chr": chrom,
+                "hypo_z_intra_mean": hypo_mean,
+                "hypo_z_intra_std": hypo_std,
+                "hyper_z_intra_mean": hyper_mean,
+                "hyper_z_intra_std": hyper_std,
+                "percentage_mean": pct_mean,
+                "percentage_std": pct_std,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def build_ezscore_ref_matrix(
+    episcore_all: np.ndarray,
+    zscore_all: np.ndarray,
+    ep_combos: List[Tuple[float, float]],
+    z_combos: List[Tuple[float, float]],
+    ep_best: Dict[str, Tuple[float, float]],
+    z_best: Dict[str, Tuple[float, float]],
+    ez_idx: np.ndarray,
+) -> pd.DataFrame:
+    """Per-chr mean/std of (zscore + episcore) over the ezscore reference samples."""
+    ep_combo_index = {c: i for i, c in enumerate(ep_combos)}
+    z_combo_index = {c: i for i, c in enumerate(z_combos)}
+    rows = []
+    for hi, chrom in enumerate(CHR_LIST):
+        ep_vec = episcore_all[ep_combo_index[ep_best[chrom]], hi, :]
+        z_vec = zscore_all[z_combo_index[z_best[chrom]], hi, :]
+        ez_mean, ez_std = _sample_mean_std((z_vec + ep_vec)[ez_idx])
+        rows.append({"chr": chrom, "mean": ez_mean, "std": ez_std})
+    return pd.DataFrame(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -570,6 +642,21 @@ def run_repeat(
             "min_recall": [z_min_recall] * len(CHR_LIST),
         }
     ).to_csv(out_dir / "best_combo_zscore.csv", index=False)
+
+    ref_matrix_df = build_reference_matrix(
+        ep_arrays[0], ep_arrays[1], z_array,
+        ep_combos, z_combos, ep_best, z_best, ref_idx,
+    )
+    ref_matrix_df.to_csv(
+        out_dir / "best_reference_matrix.tsv", sep="\t", index=False, float_format="%.6f"
+    )
+
+    ezscore_ref_matrix_df = build_ezscore_ref_matrix(
+        episcore_all, zscore_all, ep_combos, z_combos, ep_best, z_best, ez_idx,
+    )
+    ezscore_ref_matrix_df.to_csv(
+        out_dir / "best_ezscore_ref_20_matrix.tsv", sep="\t", index=False, float_format="%.6f"
+    )
 
     metrics_df = pd.DataFrame(metrics_rows)[["score", "set", "mcc", "tp", "tn", "fp", "fn"]]
     metrics_df.insert(0, "repeat_index", repeat_index)

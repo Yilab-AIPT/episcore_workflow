@@ -11,3 +11,4 @@ containers
 *logs*
 __pycache__/
 *.out
+*.log

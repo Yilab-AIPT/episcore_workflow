@@ -12,6 +12,7 @@ Writes:
     best_sample_scores_annotated.tsv
     confusion_{episcore,zscore,ezscore}.png
     best_ezscore_ref_{n}_samples.txt
+    best_ezscore_ref_20_matrix.tsv   (when n_ezscore_ref=20)
     best_sample_scores_recalc_ezscore.tsv
     confusion_ezscore_recalc.png
     finalize_summary.json
@@ -51,7 +52,12 @@ def _mcc_from_pred(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return (tp * tn - fp * fn) / denom if denom > 0 else 0.0
 
 
-def _recalc_ezscore(combined: np.ndarray, ref_idx: np.ndarray) -> np.ndarray:
+def _recalc_ezscore(combined: np.ndarray, ref_idx: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Z-normalize combined scores per chromosome; return ezscore and ref mean/std."""
+    n_chr = combined.shape[1]
+    ez = np.empty_like(combined)
+    ref_mean = np.empty(n_chr, dtype=np.float64)
+    ref_std = np.empty(n_chr, dtype=np.float64)
     ref_vals = combined[ref_idx]
     with np.errstate(invalid="ignore"):
         mu = np.nanmean(ref_vals, axis=0)
@@ -59,7 +65,10 @@ def _recalc_ezscore(combined: np.ndarray, ref_idx: np.ndarray) -> np.ndarray:
     mu = np.where(np.isfinite(mu), mu, 0.0)
     sd_safe = np.where(sd > 0, sd, np.nan)
     with np.errstate(divide="ignore", invalid="ignore"):
-        return (combined - mu) / sd_safe
+        ez = (combined - mu) / sd_safe
+    ref_mean[:] = mu
+    ref_std[:] = np.where(np.isfinite(sd), sd, 0.0)
+    return ez, ref_mean, ref_std
 
 
 def search_best_ezscore_ref(
@@ -67,7 +76,7 @@ def search_best_ezscore_ref(
     n_ezscore_ref: int,
     n_repeats: int,
     seed: int,
-) -> tuple[np.ndarray, float, list[str]]:
+) -> tuple[np.ndarray, float, list[str], np.ndarray, np.ndarray]:
     """Random search over Normal-sample ezscore reference subsets."""
     ep_cols = [f"episcore_chr{n}" for n in CHR_NUMS]
     z_cols = [f"zscore_chr{n}" for n in CHR_NUMS]
@@ -96,10 +105,12 @@ def search_best_ezscore_ref(
     best_mcc = -np.inf
     best_ref_idx: Optional[np.ndarray] = None
     best_ez: Optional[np.ndarray] = None
+    best_ez_mean: Optional[np.ndarray] = None
+    best_ez_std: Optional[np.ndarray] = None
 
     for _ in range(n_repeats):
         ref_idx = rng.choice(normal_idx, size=n_ezscore_ref, replace=False)
-        ez = _recalc_ezscore(combined, ref_idx)
+        ez, ez_mean, ez_std = _recalc_ezscore(combined, ref_idx)
         any_pos = (ez > SCORE_CUTOFF).any(axis=1)
         y_pred = any_pos & ~both_normal
         y_pred[mask_t15] = False
@@ -108,15 +119,17 @@ def search_best_ezscore_ref(
             best_mcc = mcc
             best_ref_idx = ref_idx.copy()
             best_ez = ez.copy()
+            best_ez_mean = ez_mean.copy()
+            best_ez_std = ez_std.copy()
 
-    if best_ref_idx is None or best_ez is None:
+    if best_ref_idx is None or best_ez is None or best_ez_mean is None or best_ez_std is None:
         raise click.ClickException("Ezscore reference search found no valid draw")
 
     best_ref_samples = df.iloc[best_ref_idx]["sample"].astype(str).tolist()
     console.print(f"Best ezscore MCC: {best_mcc:.4f}")
     console.print(f"Best {n_ezscore_ref}-sample ezscore reference:")
     console.print(", ".join(best_ref_samples))
-    return best_ez, best_mcc, best_ref_samples
+    return best_ez, best_mcc, best_ref_samples, best_ez_mean, best_ez_std
 
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
@@ -191,7 +204,7 @@ def main(
         console.rule("[bold green]Done (ezscore search skipped)")
         return
 
-    best_ez, best_ez_mcc, best_ref_samples = search_best_ezscore_ref(
+    best_ez, best_ez_mcc, best_ref_samples, best_ez_mean, best_ez_std = search_best_ezscore_ref(
         annotated, n_ezscore_ref, n_repeats, seed
     )
 
@@ -206,6 +219,17 @@ def main(
     recalc.to_csv(recalc_path, sep="\t", index=False, float_format="%.6f")
     console.print(f"[green]OK[/green] Wrote {ref_path}")
     console.print(f"[green]OK[/green] Wrote {recalc_path}")
+
+    if n_ezscore_ref == 20:
+        ez_matrix_path = out_base / "best_ezscore_ref_20_matrix.tsv"
+        pd.DataFrame(
+            {
+                "chr": [f"chr{n}" for n in CHR_NUMS],
+                "mean": best_ez_mean,
+                "std": best_ez_std,
+            }
+        ).to_csv(ez_matrix_path, sep="\t", index=False, float_format="%.6f")
+        console.print(f"[green]OK[/green] Wrote {ez_matrix_path}")
 
     console.print("\nEzscore match_status counts (recalculated):")
     console.print(recalc["match_status_ezscore"].value_counts().to_string())

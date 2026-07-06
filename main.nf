@@ -8,10 +8,12 @@ include { validateAndParseSamplesheet } from './lib/samplesheet_parser.nf'
 include { validateAndParseGridSearchParameters } from './lib/grid_search_parameters_parser.nf'
 include { validateAndParseSnpFFSamplesheet } from './lib/snp_est_ff_samplesheet_parser.nf'
 include { validateAndParsePerturbedResSamplesheet } from './lib/perturbed_res_samplesheet_parser.nf'
+include { validateAndParseAiptRef40Samplesheet } from './lib/aipt_ref_40_samplesheet_parser.nf'
 include { NIPT  } from './workflows/nipt'
 include { GRID_SEARCH } from './workflows/grid_search'
 include { SNP_EST_FF } from './workflows/snp_est_ff'
 include { PERTURBED_RES } from './workflows/perturbed_res'
+include { AIPT_REF_40 } from './workflows/aipt_ref_40'
 
 workflow MAIN {
     take:
@@ -49,6 +51,16 @@ workflow PERTURB {
 
     main:
     PERTURBED_RES (
+        ch_samplesheet
+    )
+}
+
+workflow REF_40 {
+    take:
+    ch_samplesheet
+
+    main:
+    AIPT_REF_40 (
         ch_samplesheet
     )
 }
@@ -104,6 +116,18 @@ workflow {
         // WORKFLOW: Run methylation-perturbation workflow
         //
         PERTURB (
+            ch_samplesheet
+        )
+    }
+
+    if (params.step in ['aipt_ref_40']) {
+        // Validate and parse samplesheet
+        ch_samplesheet = validateAndParseAiptRef40Samplesheet(params.input)
+
+        //
+        // WORKFLOW: Run AIPT ref-40 episcore/zscore/ezscore scoring workflow
+        //
+        REF_40 (
             ch_samplesheet
         )
     }

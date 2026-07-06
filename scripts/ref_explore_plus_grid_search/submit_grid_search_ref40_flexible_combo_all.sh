@@ -5,17 +5,17 @@
 #     ./submit_ref40_best_of_all.sh [-n|--dry-run] [--no-finalize]
 #
 # Defaults:
-#     output_base   : /lustre1/cqyi/AIPT_2.0/results/episcore_output/20260625-ref_40_fixed_combo_all
+#     output_base   : /lustre1/cqyi/AIPT_2.0/results/episcore_output/20260625-ref_40_flexible_combo_all
 #     total_repeats : 10000
 #     min-ff        : 0.01
 
 set -euo pipefail
 
 INPUT_DIR=/lustre1/cqyi/AIPT_2.0/data/meta/episcore/20260621-ref_40_rebuild_consider_lib_ng
-OUTPUT_BASE=/lustre1/cqyi/AIPT_2.0/results/episcore_output/20260625-ref_40_fixed_combo_all
+OUTPUT_BASE=/lustre1/cqyi/AIPT_2.0/results/episcore_output/20260625-ref_40_flexible_combo_all
 TOTAL_REPEATS=10000
 SPLIT_MODE=all
-COMBO_MODE=fix
+COMBO_MODE=flexible
 MIN_FF=0.01
 N_EZSCORE_REF=20
 EZSCORE_REPEATS=5000

@@ -9,8 +9,9 @@ matching reference / combo / score files, then:
        reference sample list and episcore/zscore/ezscore MCC/TP/TN/FP/FN.
        Supports ``dev_test_split`` (dev + test sets) and ``all`` (single all set).
     2. Selects the best repeat by a configurable score+metric criterion.
-    3. Writes the best reference list, best combos, best metrics, and the
-       per-sample scores under that best reference + combo to the output base.
+    3. Writes the best reference list, best combos, best metrics, reference /
+       ezscore normalization matrices, and the per-sample scores under that
+       best reference + combo to the output base.
 """
 
 from __future__ import annotations
@@ -170,6 +171,10 @@ def main(output_base: str, select_score: str, select_metric: Optional[str]) -> N
     shutil.copyfile(best_dir / "reference_samples.txt", out_base / "best_reference_samples.txt")
     shutil.copyfile(best_dir / "best_combo_episcore.csv", out_base / "best_combo_episcore.csv")
     shutil.copyfile(best_dir / "best_combo_zscore.csv", out_base / "best_combo_zscore.csv")
+    shutil.copyfile(best_dir / "best_reference_matrix.tsv", out_base / "best_reference_matrix.tsv")
+    shutil.copyfile(
+        best_dir / "best_ezscore_ref_20_matrix.tsv", out_base / "best_ezscore_ref_20_matrix.tsv"
+    )
     shutil.copyfile(best_dir / "scores.tsv", out_base / "best_sample_scores.tsv")
 
     best_metrics = pd.read_csv(best_dir / "metrics.tsv", sep="\t")
