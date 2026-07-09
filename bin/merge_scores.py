@@ -7,7 +7,8 @@ mean/std from ``best_ezscore_ref_20_matrix.tsv`` (the fixed ezscore reference).
 row produced by ``estimate_ff_with_higher_precision.py``).
 
 Output ``{output_prefix}_scores.tsv`` (long, one row per autosome) has columns:
-``sample, ff_before_mq, chr, episcore, zscore, ezscore``.
+``sample, ff_before_mq, chr, episcore, zscore`` and, unless ``--skip-ezscore`` is
+set, ``ezscore``.
 """
 
 import sys
@@ -41,8 +42,10 @@ def read_ff_before_mq(path: Path) -> float:
               help="{sample}_zscore.tsv with columns chr,zscore.")
 @click.option("--ff", "ff_tsv", required=True, type=click.Path(exists=True),
               help="SNP FF table ({sample}_ff.tsv) with an 'all' ff_before_mq row.")
-@click.option("--ezscore-matrix", required=True, type=click.Path(exists=True),
+@click.option("--ezscore-matrix", default=None, type=click.Path(exists=True),
               help="best_ezscore_ref_20_matrix.tsv with columns chr,mean,std.")
+@click.option("--skip-ezscore", is_flag=True, default=False,
+              help="Omit ezscore; output episcore and zscore only.")
 @click.option("--output-prefix", required=True, type=str,
               help="Output prefix; writes {prefix}_scores.tsv.")
 def main(
@@ -50,31 +53,41 @@ def main(
     episcore_tsv: str,
     zscore_tsv: str,
     ff_tsv: str,
-    ezscore_matrix: str,
+    ezscore_matrix: str | None,
+    skip_ezscore: bool,
     output_prefix: str,
 ) -> None:
-    """Merge per-chr episcore/zscore, derive ezscore, attach ff_before_mq."""
+    """Merge per-chr episcore/zscore, optionally derive ezscore, attach ff_before_mq."""
     try:
+        if skip_ezscore and ezscore_matrix:
+            raise ValueError("Pass either --skip-ezscore or --ezscore-matrix, not both.")
+        if not skip_ezscore and not ezscore_matrix:
+            raise ValueError("Provide --ezscore-matrix or pass --skip-ezscore.")
+
         episcore = pd.read_csv(episcore_tsv, sep="\t")[["chr", "episcore"]]
         zscore = pd.read_csv(zscore_tsv, sep="\t")[["chr", "zscore"]]
-        ez = pd.read_csv(ezscore_matrix, sep="\t")[["chr", "mean", "std"]]
-        ez = ez.rename(columns={"mean": "ez_mean", "std": "ez_std"})
         ff_before_mq = read_ff_before_mq(Path(ff_tsv))
 
         df = pd.DataFrame({"chr": CHR_LIST})
         df = df.merge(episcore, on="chr", how="left")
         df = df.merge(zscore, on="chr", how="left")
-        df = df.merge(ez, on="chr", how="left")
 
-        combined = df["episcore"].to_numpy() + df["zscore"].to_numpy()
-        std_safe = np.where(df["ez_std"].to_numpy() > 0, df["ez_std"].to_numpy(), np.nan)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            ezscore = (combined - df["ez_mean"].to_numpy()) / std_safe
-        df["ezscore"] = ezscore
+        if skip_ezscore:
+            out_cols = ["sample", "ff_before_mq", "chr", "episcore", "zscore"]
+        else:
+            ez = pd.read_csv(ezscore_matrix, sep="\t")[["chr", "mean", "std"]]
+            ez = ez.rename(columns={"mean": "ez_mean", "std": "ez_std"})
+            df = df.merge(ez, on="chr", how="left")
+            combined = df["episcore"].to_numpy() + df["zscore"].to_numpy()
+            std_safe = np.where(df["ez_std"].to_numpy() > 0, df["ez_std"].to_numpy(), np.nan)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                ezscore = (combined - df["ez_mean"].to_numpy()) / std_safe
+            df["ezscore"] = ezscore
+            out_cols = ["sample", "ff_before_mq", "chr", "episcore", "zscore", "ezscore"]
 
         df.insert(0, "sample", sample)
         df.insert(1, "ff_before_mq", ff_before_mq)
-        out = df[["sample", "ff_before_mq", "chr", "episcore", "zscore", "ezscore"]]
+        out = df[out_cols]
 
         out_path = f"{output_prefix}_scores.tsv"
         out.to_csv(out_path, sep="\t", index=False, float_format="%.6f")

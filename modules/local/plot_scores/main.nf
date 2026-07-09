@@ -3,6 +3,7 @@ process PLOT_SCORES {
 
     input:
     tuple val(meta), path(scores_tsv)
+    val(skip_ezscore)
     path(precomputed_scores)
     val(score_cutoff)
 
@@ -12,10 +13,11 @@ process PLOT_SCORES {
     script:
     def prefix = task.ext.prefix ?: "${meta.id}"
     def cutoff_arg = (score_cutoff != null && "${score_cutoff}" != 'null') ? "--threshold ${score_cutoff}" : ""
+    def ez_arg = skip_ezscore ? '--skip-ezscore' : "--precomputed-tsv ${precomputed_scores}"
     """
     plot_scores.py \\
         --scores-tsv ${scores_tsv} \\
-        --precomputed-tsv ${precomputed_scores} \\
+        ${ez_arg} \\
         --output-prefix ${prefix} \\
         ${cutoff_arg}
     """

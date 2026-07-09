@@ -33,6 +33,12 @@ def parseEpiscoreThresholds(grid_search_result) {
     return thresholds.join(',')
 }
 
+def hasEzscoreAssets(grid_search_result) {
+    def ez_matrix = file("${grid_search_result}/best_ezscore_ref_20_matrix.tsv")
+    def precomputed = file("${grid_search_result}/best_sample_scores_recalc_ezscore.tsv")
+    return ez_matrix.exists() && precomputed.exists()
+}
+
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     RUN MAIN WORKFLOW
@@ -45,6 +51,12 @@ workflow AIPT_REF_40 {
 
     main:
     def ep_thresholds = parseEpiscoreThresholds(params.grid_search_result)
+    def skip_ezscore = !hasEzscoreAssets(params.grid_search_result)
+    def ref_matrix = file("${params.grid_search_result}/best_reference_matrix.tsv")
+
+    if (skip_ezscore) {
+        log.warn "Ezscore reference assets missing under ${params.grid_search_result}; scoring episcore/zscore/FF only."
+    }
 
     // Collapse multi-row samples to one BAM (merged + deduped) and one merged
     // deconv_res per sample before any scoring.
@@ -56,7 +68,7 @@ workflow AIPT_REF_40 {
     AIPT_ZSCORE(ch_prepared)
     AIPT_FF(ch_prepared)
 
-    // Combine episcore + zscore + ff -> {sample}_scores.tsv (+ ezscore)
+    // Combine episcore + zscore + ff -> {sample}_scores.tsv (+ ezscore when available)
     AIPT_EPISCORE.out.episcore
         .join(AIPT_ZSCORE.out.zscore, by: 0)
         .join(AIPT_FF.out.ff, by: 0)
@@ -64,13 +76,19 @@ workflow AIPT_REF_40 {
 
     MERGE_SCORES(
         ch_merge_input,
-        file("${params.grid_search_result}/best_ezscore_ref_20_matrix.tsv")
+        skip_ezscore,
+        skip_ezscore
+            ? ref_matrix
+            : file("${params.grid_search_result}/best_ezscore_ref_20_matrix.tsv")
     )
 
     // Visualise score distribution per sample
     PLOT_SCORES(
         MERGE_SCORES.out.scores,
-        file("${params.grid_search_result}/best_sample_scores_recalc_ezscore.tsv"),
+        skip_ezscore,
+        skip_ezscore
+            ? ref_matrix
+            : file("${params.grid_search_result}/best_sample_scores_recalc_ezscore.tsv"),
         params.score_cutoff
     )
 

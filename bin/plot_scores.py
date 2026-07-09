@@ -73,22 +73,27 @@ def plot_score_page(
     """Render one 6x4 page for a single score."""
     fig, axes = plt.subplots(N_ROWS, N_COLS, figsize=(20, 24))
     axes = axes.flatten()
+    has_ref = (
+        not precomputed_long.empty
+        and "chr_num" in precomputed_long.columns
+    )
 
     for idx, n in enumerate(CHR_NUMS):
         ax = axes[idx]
         chrom = f"chr{n}"
 
-        sub = precomputed_long[precomputed_long["chr_num"] == n]
-        if not sub.empty:
-            ax.scatter(
-                sub["ff_before_mq"],
-                sub["value"],
-                c=point_colors(sub, n),
-                alpha=0.8,
-                s=35,
-                edgecolors="none",
-                zorder=2,
-            )
+        if has_ref:
+            sub = precomputed_long[precomputed_long["chr_num"] == n]
+            if not sub.empty:
+                ax.scatter(
+                    sub["ff_before_mq"],
+                    sub["value"],
+                    c=point_colors(sub, n),
+                    alpha=0.8,
+                    s=35,
+                    edgecolors="none",
+                    zorder=2,
+                )
 
         srow = sample_df[sample_df["chr"] == chrom]
         if not srow.empty:
@@ -117,12 +122,17 @@ def plot_score_page(
     legend_handles = [
         Line2D([0], [0], marker="*", color="w", markerfacecolor="blue",
                markeredgecolor="black", markersize=18, label=f"{sample_id} (this sample)"),
-        Line2D([0], [0], marker="o", color="w", markerfacecolor="red",
-               markersize=10, label="reference T{n} on chr{n}"),
-        Line2D([0], [0], marker="o", color="w", markerfacecolor="gray",
-               markersize=10, label="other reference samples"),
-        Line2D([0], [0], color="black", linestyle=":", label=f"y = {threshold:g}"),
     ]
+    if has_ref:
+        legend_handles.extend([
+            Line2D([0], [0], marker="o", color="w", markerfacecolor="red",
+                   markersize=10, label="reference T{n} on chr{n}"),
+            Line2D([0], [0], marker="o", color="w", markerfacecolor="gray",
+                   markersize=10, label="other reference samples"),
+        ])
+    legend_handles.append(
+        Line2D([0], [0], color="black", linestyle=":", label=f"y = {threshold:g}"),
+    )
     fig.legend(handles=legend_handles, loc="lower center", ncol=4, fontsize=12,
                frameon=False, bbox_to_anchor=(0.5, 0.005))
     fig.suptitle(f"{sample_id} — {score}", fontsize=18, y=0.995)
@@ -134,29 +144,37 @@ def plot_score_page(
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
 @click.option("--scores-tsv", required=True, type=click.Path(exists=True),
               help="{sample}_scores.tsv (long: sample,ff_before_mq,chr,episcore,zscore,ezscore).")
-@click.option("--precomputed-tsv", required=True, type=click.Path(exists=True),
+@click.option("--precomputed-tsv", default=None, type=click.Path(exists=True),
               help="best_sample_scores_recalc_ezscore.tsv (wide reference scores).")
+@click.option("--skip-ezscore", is_flag=True, default=False,
+              help="Plot episcore/zscore only; omit ezscore page and reference cloud.")
 @click.option("--output-prefix", required=True, type=str,
               help="Output prefix; writes {prefix}_scores.pdf.")
 @click.option("--threshold", type=float, default=3.0, show_default=True,
               help="Horizontal reference line (positive-call cutoff).")
 def main(
     scores_tsv: str,
-    precomputed_tsv: str,
+    precomputed_tsv: str | None,
+    skip_ezscore: bool,
     output_prefix: str,
     threshold: float,
 ) -> None:
-    """Render the 3-page per-chromosome score distribution PDF."""
+    """Render per-chromosome score distribution PDF (2 or 3 pages)."""
     try:
         sample_df = pd.read_csv(scores_tsv, sep="\t")
         sample_df["chr"] = sample_df["chr"].astype(str)
         sample_id = str(sample_df["sample"].iloc[0]) if "sample" in sample_df.columns else "sample"
-        precomputed = pd.read_csv(precomputed_tsv, sep="\t")
+        scores = ["episcore", "zscore"] if skip_ezscore else SCORES
+        precomputed = pd.read_csv(precomputed_tsv, sep="\t") if precomputed_tsv else None
 
         out_path = f"{output_prefix}_scores.pdf"
         with PdfPages(out_path) as pdf:
-            for score in SCORES:
-                precomputed_long = melt_precomputed(precomputed, score)
+            for score in scores:
+                precomputed_long = (
+                    melt_precomputed(precomputed, score)
+                    if precomputed is not None
+                    else pd.DataFrame()
+                )
                 plot_score_page(pdf, score, precomputed_long, sample_df, sample_id, threshold)
 
         console.print(f"[green]OK[/green] Wrote {out_path}")
