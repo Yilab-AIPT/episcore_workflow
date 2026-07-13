@@ -17,6 +17,8 @@ workflow AIPT_EPISCORE {
     ep_thresholds       // val: comma-separated distinct episcore thresholds
 
     main:
+    def n_episcore_thresholds = ep_thresholds.split(',').size()
+
     SPLIT_BAM_BY_THRESHOLDS(ch_samplesheet, ep_thresholds)
 
     // Fan out to one item per (sample, threshold) target BAM with a composite key.
@@ -47,9 +49,12 @@ workflow AIPT_EPISCORE {
     )
 
     // Regroup per-threshold bedGraphs back to one item per sample.
+    // size must match the number of distinct episcore thresholds so each sample
+    // emits as soon as its bedGraphs are ready (default groupTuple blocks until
+    // every upstream sample completes MethylDackel).
     METHYLDACKEL_EXTRACT.out.bedgraph
         .map { tmeta, bedgraph -> [[id: tmeta.sample], bedgraph] }
-        .groupTuple()
+        .groupTuple(size: n_episcore_thresholds)
         .set { ch_bedgraphs }
 
     def ref_matrix = file("${params.grid_search_result}/best_reference_matrix.tsv")

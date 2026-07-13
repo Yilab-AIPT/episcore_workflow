@@ -28,14 +28,18 @@ NF_MAIN=/lustre1/cqyi/AIPT_2.0/workflow/episcore/main.nf
 PROJECT_DIR=/lustre1/cqyi/AIPT_2.0/workflow/episcore
 COMMON_TOOLS="${PROJECT_DIR}/containers/common_tools.sif"
 
-SAMPLESHEET=${SAMPLESHEET:-/lustre1/cqyi/syfan/nf_methylbert_infer/data/220k_data_mb_vs_mq/20260705_infered_additional_samplesheet.csv}
-GRID_SEARCH_RESULT=${GRID_SEARCH_RESULT:-/lustre1/cqyi/syfan/nf_methylbert_infer/data/220k_data_mb_vs_mq/20260705_grid_search_fixed_combo}
-OUTDIR=${OUTDIR:-/lustre1/cqyi/AIPT_2.0/results/episcore_output/20260705-mb_infered_aipt_ref_40}
-WORKDIR=${WORKDIR:-/lustre1/cqyi/AIPT_2.0/tmp/episcore_workflow_tmp_dir/mb_infered_20260705}
+SAMPLESHEET=${SAMPLESHEET:-/lustre1/cqyi/syfan/nf_methylbert_infer/data/220k_data_mb_vs_mq/20260712_inferred_summarized_samplesheet.csv}
+GRID_SEARCH_RESULT=${GRID_SEARCH_RESULT:-/lustre1/cqyi/syfan/nf_methylbert_infer/data/220k_data_mb_vs_mq/20260712_grid_search_fixed_combo}
+OUTDIR=${OUTDIR:-/lustre1/cqyi/syfan/nf_methylbert_infer/results/20260712-mb_infered}
+WORKDIR=${WORKDIR:-/lustre1/cqyi/AIPT_2.0/tmp/episcore_workflow_tmp_dir/mb_infered_20260712}
 NF_RESUME=${NF_RESUME:-1}
 
-EPISCORE_REF_MATRIX="/lustre1/cqyi/syfan/nf_methylbert_infer/results/old_model_downsampled_episcore/output/threshold_0.67_recall_0.77/reference_beta_matrix_threshold_0.67_recall_0.77.tsv"
+EPISCORE_REF_MATRIX="/lustre1/cqyi/syfan/nf_methylbert_infer/results/old_model_downsampled_episcore/output/threshold_0.5_recall_0.66/_reference_zscore.tsv.gz"
 ZSCORE_REF_DIR="/lustre1/cqyi/AIPT_2.0/results/zscore_output/20260611-MB-grid_search/zscore_results/recall.0.92_cutoff.0.55"
+EPISCORE_THRESHOLD=0.5
+EPISCORE_RECALL=0.66
+ZSCORE_THRESHOLD=0.55
+ZSCORE_RECALL=0.92
 
 if [ ! -f "$SAMPLESHEET" ]; then
     echo "ERROR: samplesheet not found: $SAMPLESHEET" >&2
@@ -60,7 +64,11 @@ if [ ! -f "${GRID_SEARCH_RESULT}/best_reference_matrix.tsv" ]; then
         python3 "${SCRIPT_DIR}/build_grid_search_assets.py" \
         --episcore-reference-matrix "$EPISCORE_REF_MATRIX" \
         --zscore-reference-dir "$ZSCORE_REF_DIR" \
-        --output-dir "$GRID_SEARCH_RESULT"
+        --output-dir "$GRID_SEARCH_RESULT" \
+        --episcore-threshold "$EPISCORE_THRESHOLD" \
+        --episcore-recall "$EPISCORE_RECALL" \
+        --zscore-threshold "$ZSCORE_THRESHOLD" \
+        --zscore-recall "$ZSCORE_RECALL"
 fi
 
 for f in \

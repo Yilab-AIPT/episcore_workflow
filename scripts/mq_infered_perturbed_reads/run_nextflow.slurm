@@ -29,7 +29,7 @@ NF_MAIN=/lustre1/cqyi/AIPT_2.0/workflow/episcore/main.nf
 PROJECT_DIR=/lustre1/cqyi/AIPT_2.0/workflow/episcore
 
 SAMPLESHEET=${SAMPLESHEET:-/lustre1/cqyi/syfan/nf_methylqueen_infer/results/methylation_conversion_experiment/20260703/mq_infered_result.csv}
-OUTDIR=${OUTDIR:-/lustre1/cqyi/AIPT_2.0/results/episcore_output/20260703-mq_infered_perturbed_reads}
+OUTDIR=${OUTDIR:-/lustre1/cqyi/syfan/nf_methylqueen_infer/results/methylation_conversion_experiment/20260703/20260703-mq_infered_perturbed_reads}
 WORKDIR=${WORKDIR:-/lustre1/cqyi/AIPT_2.0/tmp/episcore_workflow_tmp_dir/mq_infered_perturbed_20260703}
 
 # Early-panel params for MQ deconv results (override perturbed_res.config defaults).

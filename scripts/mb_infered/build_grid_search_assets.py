@@ -155,8 +155,8 @@ def _load_zscore_ref_stats(
     type=click.Path(file_okay=False),
     help="Directory to write best_combo_* and best_reference_matrix.tsv.",
 )
-@click.option("--episcore-threshold", default=0.67, show_default=True, type=float)
-@click.option("--episcore-recall", default=0.77, show_default=True, type=float)
+@click.option("--episcore-threshold", default=0.5, show_default=True, type=float)
+@click.option("--episcore-recall", default=0.66, show_default=True, type=float)
 @click.option("--zscore-threshold", default=0.55, show_default=True, type=float)
 @click.option("--zscore-recall", default=0.92, show_default=True, type=float)
 @click.option("--has-target", is_flag=True, default=True, show_default=True,

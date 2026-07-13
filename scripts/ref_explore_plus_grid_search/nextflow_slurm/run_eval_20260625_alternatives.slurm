@@ -23,7 +23,8 @@ run_case() {
     --grid_search_result "${grid}"
 }
 
-run_case fixed_ez25 /lustre1/cqyi/AIPT_2.0/workflow/episcore/assets/ref_40/flexible_combo_all_fixed_ez25
-run_case even_split /lustre1/cqyi/AIPT_2.0/workflow/episcore/assets/ref_40/flexible_combo_even_split
+# run_case fixed_ez25 /lustre1/cqyi/AIPT_2.0/workflow/episcore/assets/ref_40/flexible_combo_all_fixed_ez25
+# run_case even_split /lustre1/cqyi/AIPT_2.0/workflow/episcore/assets/ref_40/flexible_combo_even_split
+run_case fixed_combo_all /lustre1/cqyi/AIPT_2.0/workflow/episcore/assets/ref_40/fixed_combo_all
 
 echo "All evaluation runs finished."
