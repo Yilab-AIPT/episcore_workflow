@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Combine per-chromosome episcore, zscore, ezscore and FF for one sample.
+"""Combine per-chromosome episcore, zscore, ezscore and optional FF for one sample.
 
 ``ezscore`` is the z-normalised ``episcore + zscore`` using the per-chromosome
 mean/std from ``best_ezscore_ref_20_matrix.tsv`` (the fixed ezscore reference).
-``ff_before_mq`` is read from the SNP fetal-fraction table (the ``chr == 'all'``
-row produced by ``estimate_ff_with_higher_precision.py``).
+When ``--ff`` is provided, ``ff_before_mq`` is read from the SNP fetal-fraction
+table (the ``chr == 'all'`` row). With ``--skip-ff``, ``ff_before_mq`` is omitted.
 
 Output ``{output_prefix}_scores.tsv`` (long, one row per autosome) has columns:
-``sample, ff_before_mq, chr, episcore, zscore`` and, unless ``--skip-ezscore`` is
-set, ``ezscore``.
+``sample, [ff_before_mq,] chr, episcore, zscore`` and, unless ``--skip-ezscore``
+is set, ``ezscore``.
 """
 
 import sys
@@ -40,8 +40,10 @@ def read_ff_before_mq(path: Path) -> float:
               help="{sample}_episcore.tsv with columns chr,episcore.")
 @click.option("--zscore", "zscore_tsv", required=True, type=click.Path(exists=True),
               help="{sample}_zscore.tsv with columns chr,zscore.")
-@click.option("--ff", "ff_tsv", required=True, type=click.Path(exists=True),
+@click.option("--ff", "ff_tsv", default=None, type=click.Path(exists=True),
               help="SNP FF table ({sample}_ff.tsv) with an 'all' ff_before_mq row.")
+@click.option("--skip-ff", is_flag=True, default=False,
+              help="Omit ff_before_mq from the output.")
 @click.option("--ezscore-matrix", default=None, type=click.Path(exists=True),
               help="best_ezscore_ref_20_matrix.tsv with columns chr,mean,std.")
 @click.option("--skip-ezscore", is_flag=True, default=False,
@@ -52,7 +54,8 @@ def main(
     sample: str,
     episcore_tsv: str,
     zscore_tsv: str,
-    ff_tsv: str,
+    ff_tsv: str | None,
+    skip_ff: bool,
     ezscore_matrix: str | None,
     skip_ezscore: bool,
     output_prefix: str,
@@ -63,17 +66,20 @@ def main(
             raise ValueError("Pass either --skip-ezscore or --ezscore-matrix, not both.")
         if not skip_ezscore and not ezscore_matrix:
             raise ValueError("Provide --ezscore-matrix or pass --skip-ezscore.")
+        if skip_ff and ff_tsv:
+            raise ValueError("Pass either --skip-ff or --ff, not both.")
+        if not skip_ff and not ff_tsv:
+            raise ValueError("Provide --ff or pass --skip-ff.")
 
         episcore = pd.read_csv(episcore_tsv, sep="\t")[["chr", "episcore"]]
         zscore = pd.read_csv(zscore_tsv, sep="\t")[["chr", "zscore"]]
-        ff_before_mq = read_ff_before_mq(Path(ff_tsv))
 
         df = pd.DataFrame({"chr": CHR_LIST})
         df = df.merge(episcore, on="chr", how="left")
         df = df.merge(zscore, on="chr", how="left")
 
         if skip_ezscore:
-            out_cols = ["sample", "ff_before_mq", "chr", "episcore", "zscore"]
+            score_cols = ["chr", "episcore", "zscore"]
         else:
             ez = pd.read_csv(ezscore_matrix, sep="\t")[["chr", "mean", "std"]]
             ez = ez.rename(columns={"mean": "ez_mean", "std": "ez_std"})
@@ -83,15 +89,22 @@ def main(
             with np.errstate(divide="ignore", invalid="ignore"):
                 ezscore = (combined - df["ez_mean"].to_numpy()) / std_safe
             df["ezscore"] = ezscore
-            out_cols = ["sample", "ff_before_mq", "chr", "episcore", "zscore", "ezscore"]
+            score_cols = ["chr", "episcore", "zscore", "ezscore"]
 
         df.insert(0, "sample", sample)
-        df.insert(1, "ff_before_mq", ff_before_mq)
-        out = df[out_cols]
+        if skip_ff:
+            out_cols = ["sample"] + score_cols
+            msg = "ff skipped"
+        else:
+            ff_before_mq = read_ff_before_mq(Path(ff_tsv))
+            df.insert(1, "ff_before_mq", ff_before_mq)
+            out_cols = ["sample", "ff_before_mq"] + score_cols
+            msg = f"ff_before_mq={ff_before_mq:.4f}"
 
+        out = df[out_cols]
         out_path = f"{output_prefix}_scores.tsv"
         out.to_csv(out_path, sep="\t", index=False, float_format="%.6f")
-        console.print(f"[green]OK[/green] Wrote {out_path} (ff_before_mq={ff_before_mq:.4f})")
+        console.print(f"[green]OK[/green] Wrote {out_path} ({msg})")
 
     except Exception as exc:  # noqa: BLE001 - top-level reporting only
         console.print(f"\n[bold red]Error:[/bold red] {exc}", style="bold red")

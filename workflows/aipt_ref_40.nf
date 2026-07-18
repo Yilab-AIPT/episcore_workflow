@@ -52,10 +52,14 @@ workflow AIPT_REF_40 {
     main:
     def ep_thresholds = parseEpiscoreThresholds(params.grid_search_result)
     def skip_ezscore = !hasEzscoreAssets(params.grid_search_result)
+    def skip_ff = params.skip_ff
     def ref_matrix = file("${params.grid_search_result}/best_reference_matrix.tsv")
 
     if (skip_ezscore) {
-        log.warn "Ezscore reference assets missing under ${params.grid_search_result}; scoring episcore/zscore/FF only."
+        log.warn "Ezscore reference assets missing under ${params.grid_search_result}; scoring episcore/zscore${skip_ff ? '' : '/FF'} only."
+    }
+    if (skip_ff) {
+        log.warn "params.skip_ff=true: skipping SNP-FF estimation."
     }
 
     // Collapse multi-row samples to one BAM (merged + deduped) and one merged
@@ -66,20 +70,27 @@ workflow AIPT_REF_40 {
     // Per-chromosome scores
     AIPT_EPISCORE(ch_prepared, ep_thresholds)
     AIPT_ZSCORE(ch_prepared)
-    AIPT_FF(ch_prepared)
 
-    // Combine episcore + zscore + ff -> {sample}_scores.tsv (+ ezscore when available)
-    AIPT_EPISCORE.out.episcore
-        .join(AIPT_ZSCORE.out.zscore, by: 0)
-        .join(AIPT_FF.out.ff, by: 0)
-        .set { ch_merge_input }
+    if (skip_ff) {
+        AIPT_EPISCORE.out.episcore
+            .join(AIPT_ZSCORE.out.zscore, by: 0)
+            .map { meta, episcore, zscore -> [meta, episcore, zscore, []] }
+            .set { ch_merge_input }
+    } else {
+        AIPT_FF(ch_prepared)
+        AIPT_EPISCORE.out.episcore
+            .join(AIPT_ZSCORE.out.zscore, by: 0)
+            .join(AIPT_FF.out.ff, by: 0)
+            .set { ch_merge_input }
+    }
 
     MERGE_SCORES(
         ch_merge_input,
         skip_ezscore,
         skip_ezscore
             ? ref_matrix
-            : file("${params.grid_search_result}/best_ezscore_ref_20_matrix.tsv")
+            : file("${params.grid_search_result}/best_ezscore_ref_20_matrix.tsv"),
+        skip_ff
     )
 
     // Visualise score distribution per sample

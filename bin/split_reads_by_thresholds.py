@@ -111,18 +111,40 @@ def write_read_names(output_path: Path, names: pl.Series) -> int:
     default=Path.cwd(),
     help="Output directory for the per-threshold read-name files.",
 )
-def main(input_file: Path, thresholds: str, output_dir: Path) -> None:
+@click.option(
+    "--background-threshold",
+    type=float,
+    default=None,
+    help=(
+        "Also write background_thr_{t}.txt for this threshold "
+        "(reads with prob_class_1 < t). Used for raw_total depth filtering."
+    ),
+)
+def main(
+    input_file: Path,
+    thresholds: str,
+    output_dir: Path,
+    background_threshold: float | None,
+) -> None:
     """Write one ``target_thr_{t}.txt`` per threshold (reads with prob_class_1 >= t).
 
     The deconv table is read a single time; thresholds are applied in memory.
+    When ``--background-threshold`` is set, also emit the complementary
+    background read-name list for that threshold.
     """
     try:
         threshold_values = parse_thresholds(thresholds)
+        if background_threshold is not None:
+            bg_t = float(background_threshold)
+            if bg_t not in threshold_values:
+                threshold_values = sorted(set(threshold_values) | {bg_t})
         output_dir.mkdir(parents=True, exist_ok=True)
 
         console.print("\n[bold cyan]Split reads by thresholds[/bold cyan]")
         console.print(f"Input file : {input_file}")
         console.print(f"Thresholds : {threshold_values}")
+        if background_threshold is not None:
+            console.print(f"Background : {float(background_threshold):g}")
         console.print(f"Output dir : {output_dir}\n")
 
         file_format = detect_file_format(input_file)
@@ -146,6 +168,16 @@ def main(input_file: Path, thresholds: str, output_dir: Path) -> None:
             console.print(
                 f"  [green]\u2713[/green] {out_path.name}: {count:,} target reads "
                 f"(prob_class_1 >= {t:g})"
+            )
+
+        if background_threshold is not None:
+            bg_t = float(background_threshold)
+            bg_names = df.filter(pl.col("prob_class_1") < bg_t).get_column("name")
+            bg_path = output_dir / f"background_thr_{bg_t:g}.txt"
+            bg_count = write_read_names(bg_path, bg_names)
+            console.print(
+                f"  [green]\u2713[/green] {bg_path.name}: {bg_count:,} background reads "
+                f"(prob_class_1 < {bg_t:g})"
             )
 
         console.print("\n[bold green]\u2713 Done[/bold green]\n")

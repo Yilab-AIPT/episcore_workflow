@@ -7,11 +7,12 @@ probability threshold) and the grid-search ``best_combo_episcore.csv`` (a
 episcore computation used by ``scripts/ref_explore_plus_grid_search`` for a new
 sample:
 
-    1. For every distinct ``(threshold, recall)`` combo referenced by the
+       1. For every distinct ``(threshold, recall)`` combo referenced by the
        best-combo table, take the matching threshold's target bedGraph, filter
-       it to the recall CpG list, split hypo/hyper by ``meandiff`` and compute
-       per-chromosome beta values, CpG counts and the within-sample
-       ``hypo``/``hyper`` ``z_intra`` (across all 22 autosomes for that combo).
+       it to the recall CpG list (and optional raw_total depth-filtered sites),
+       split hypo/hyper by ``meandiff`` and compute per-chromosome beta values,
+       CpG counts and the within-sample ``hypo``/``hyper`` ``z_intra``
+       (across all 22 autosomes for that combo).
     2. For each chromosome, keep the ``z_intra`` / CpG counts coming from *that
        chromosome's* best combo.
     3. Normalise each chromosome against the reference statistics in
@@ -140,11 +141,19 @@ def _zscore_across(arr: np.ndarray) -> np.ndarray:
 def compute_combo_z_intra(
     bedgraph: pd.DataFrame,
     recall_df: pd.DataFrame,
+    depth_filtered_cpgs: Optional[pd.DataFrame],
     depth: Optional[int],
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Per-chr hypo/hyper ``z_intra`` and CpG counts for one combo."""
+    """Per-chr hypo/hyper ``z_intra`` and CpG counts for one combo.
+
+    Prefer ``depth_filtered_cpgs`` (sites with raw_total > depth from
+    target+background) when provided; otherwise fall back to filtering by
+    target meth+unmeth depth.
+    """
     merged = bedgraph.merge(recall_df, on=["chr", "start", "end"], how="inner")
-    if depth is not None:
+    if depth_filtered_cpgs is not None:
+        merged = merged.merge(depth_filtered_cpgs, on=["chr", "start", "end"], how="inner")
+    elif depth is not None:
         merged = merged[(merged["meth_count"] + merged["unmeth_count"]) > depth]
     hypo = merged[merged["meandiff"] < 0]
     hyper = merged[merged["meandiff"] > 0]
@@ -184,14 +193,25 @@ def load_reference_matrix(path: Path) -> pd.DataFrame:
               help="Directory with 220k_cpg_recall_{recall}.txt files.")
 @click.option("--output-prefix", required=True, type=str,
               help="Output prefix; writes {prefix}_episcore.tsv.")
+@click.option(
+    "--depth-filtered-cpgs",
+    type=click.Path(exists=True),
+    default=None,
+    help=(
+        "CpG list (chr/start/end) already filtered by raw_total depth "
+        "(target+background). Preferred over --depth."
+    ),
+)
 @click.option("--depth", type=int, default=None,
-              help="Optional minimum (meth+unmeth) depth per CpG.")
+              help="Optional minimum target (meth+unmeth) depth per CpG "
+                   "(ignored when --depth-filtered-cpgs is set).")
 def main(
     bedgraphs: Tuple[str, ...],
     best_combo_episcore: str,
     reference_matrix: str,
     cpg_recall_dir: str,
     output_prefix: str,
+    depth_filtered_cpgs: Optional[str],
     depth: Optional[int],
 ) -> None:
     """Compute flexible per-chromosome episcore for a single sample."""
@@ -201,10 +221,22 @@ def main(
         ref_mat = load_reference_matrix(Path(reference_matrix))
         bg_map = map_bedgraphs(bedgraphs)
         recall_dir = Path(cpg_recall_dir)
+        depth_sites = None
+        if depth_filtered_cpgs is not None:
+            depth_sites = pd.read_csv(
+                depth_filtered_cpgs,
+                sep="\t",
+                usecols=["chr", "start", "end"],
+                dtype={"chr": str, "start": np.int64, "end": np.int64},
+            )
 
         console.print(f"  bedGraphs (thresholds) : {sorted(bg_map.keys())}")
         n_combos = combo_df[["threshold", "recall"]].drop_duplicates().shape[0]
         console.print(f"  chromosomes / combos   : {len(combo_df)} / {n_combos}")
+        if depth_sites is not None:
+            console.print(f"  depth-filtered CpGs    : {len(depth_sites):,}")
+        else:
+            console.print(f"  target depth filter    : {depth}")
 
         # group chromosomes by their (threshold, recall) combo
         combo_to_chrs: Dict[Tuple[float, float], List[str]] = {}
@@ -234,7 +266,10 @@ def main(
                 recall_cache[rec_key] = read_recall_list(recall_dir, rec)
 
             combo_hypo_z, combo_hyper_z, combo_hypo_c, combo_hyper_c = compute_combo_z_intra(
-                bedgraph_cache[thr_key], recall_cache[rec_key], depth
+                bedgraph_cache[thr_key],
+                recall_cache[rec_key],
+                depth_sites,
+                depth,
             )
             for chrom in chrs:
                 j = CHR_INDEX[chrom]

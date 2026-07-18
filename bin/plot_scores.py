@@ -77,6 +77,8 @@ def plot_score_page(
         not precomputed_long.empty
         and "chr_num" in precomputed_long.columns
     )
+    sample_has_ff = "ff_before_mq" in sample_df.columns
+    x_label = "ff_before_mq" if sample_has_ff else "sample"
 
     for idx, n in enumerate(CHR_NUMS):
         ax = axes[idx]
@@ -84,7 +86,7 @@ def plot_score_page(
 
         if has_ref:
             sub = precomputed_long[precomputed_long["chr_num"] == n]
-            if not sub.empty:
+            if not sub.empty and "ff_before_mq" in sub.columns and sub["ff_before_mq"].notna().any():
                 ax.scatter(
                     sub["ff_before_mq"],
                     sub["value"],
@@ -97,8 +99,9 @@ def plot_score_page(
 
         srow = sample_df[sample_df["chr"] == chrom]
         if not srow.empty:
+            x_vals = srow["ff_before_mq"] if sample_has_ff else [0.0] * len(srow)
             ax.scatter(
-                srow["ff_before_mq"],
+                x_vals,
                 srow[score],
                 marker="*",
                 c="blue",
@@ -111,7 +114,7 @@ def plot_score_page(
 
         ax.axhline(threshold, color="black", linestyle=":", linewidth=1.2, zorder=1)
         ax.set_title(chrom, fontsize=12)
-        ax.set_xlabel("ff_before_mq", fontsize=9)
+        ax.set_xlabel(x_label, fontsize=9)
         ax.set_ylabel(score, fontsize=9)
         ax.tick_params(labelsize=8)
 
