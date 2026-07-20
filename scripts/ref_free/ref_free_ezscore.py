@@ -1,26 +1,22 @@
 #!/usr/bin/env python3
 """
-Reference-free episcore / zscore / ezscore abnormality signal sweep.
+Reference-free episcore / zscore / ezscore abnormality signal sweep (48+48).
 
 For each repeat:
-    1. Randomly partition the 96 dev-set Normal samples into two disjoint groups
-       of 48: ``ref_48`` (episcore/zscore reference) and ``ez_ref_48`` (ezscore
-       reference).
-    2. Compute episcore and zscore using ``ref_48`` for every combo (or one
-       fixed episcore + zscore combo).
-    3. Compute ezscore = z-normalize(episcore + zscore) per chromosome using
-       ``ez_ref_48`` mean/std.
-    4. Flag eval samples abnormal when any chromosome score exceeds the cutoff.
-       Episcore and zscore use ``--cutoff`` (default 3.0); ezscore uses
-       ``--ez-cutoff`` when set, otherwise ``--cutoff``.
+    1. Partition 96 dev Normal samples into ref_n + ref_n halves.
+    2. Compute episcore / zscore vs the first half.
+    3. Compute ezscore = z-normalize(episcore + zscore) vs the second half.
+    4. Flag eval samples when any chromosome exceeds the cutoff.
 
-Evaluation set: dev trisomy + all test samples.
+Episcore/zscore use ``--cutoff``. Ezscore is counted on a cutoff grid
+(``--ez-cutoff-min`` .. ``--ez-cutoff-max`` step ``--ez-cutoff-step``) so
+downstream interactive plots can slide the ezscore threshold.
 
-Signal ratio denominators:
-    episcore : n_ep_combos * total_repeats
-    zscore   : n_z_combos * total_repeats
-    ezscore  : n_ez_combos * total_repeats
-               (common ep+z combos in ``all`` mode; 1 in ``fixed`` mode)
+Combo modes:
+    fixed — one episcore + one zscore combo (paired for ezscore)
+    all   — optional threshold/recall filters; ezscore pairs are the
+            intersection of identical (thr, recall) keys when non-empty,
+            otherwise the cartesian product of filtered ep × z combos
 """
 
 from __future__ import annotations
@@ -29,7 +25,7 @@ import json
 import sys
 import warnings
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import click
 import numpy as np
@@ -41,6 +37,10 @@ REF40_DIR = SCRIPT_DIR.parent / "ref_explore_plus_grid_search"
 if str(REF40_DIR) not in sys.path:
     sys.path.insert(0, str(REF40_DIR))
 
+from grid_coverage import (  # noqa: E402
+    assert_dense_coverage,
+    assert_table_coverage,
+)
 from grid_search_ref40 import (  # noqa: E402
     CHR_LIST,
     _build_dense,
@@ -52,13 +52,70 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 console = Console()
 
 DEFAULT_CUTOFF = 3.0
-DEFAULT_POOL_SIZE = 96
 DEFAULT_REF_N = 48
 Combo = Tuple[float, float]
+EzPair = Tuple[int, int]  # (ep_combo_index, z_combo_index)
 
 
 def _combo_index(combos: List[Combo]) -> Dict[Combo, int]:
     return {c: i for i, c in enumerate(combos)}
+
+
+def _ez_cutoff_grid(lo: float, hi: float, step: float) -> List[float]:
+    if step <= 0 or hi < lo:
+        raise click.ClickException("Invalid ez cutoff grid")
+    n = int(round((hi - lo) / step)) + 1
+    return [round(lo + i * step, 10) for i in range(n)]
+
+
+def _ez_count_col(cutoff: float) -> str:
+    return f"ezscore_abnormal_count_{cutoff:g}"
+
+
+def _ez_ratio_col(cutoff: float) -> str:
+    return f"ezscore_signal_ratio_{cutoff:g}"
+
+
+def _filter_combo_df(
+    df: pd.DataFrame,
+    thr_min: Optional[float],
+    thr_max: Optional[float],
+    rec_min: Optional[float],
+    rec_max: Optional[float],
+) -> pd.DataFrame:
+    out = df
+    thr = out["threshold"].astype(float)
+    rec = out["recall"].astype(float)
+    if thr_min is not None:
+        out = out.loc[thr >= thr_min]
+        thr, rec = out["threshold"].astype(float), out["recall"].astype(float)
+    if thr_max is not None:
+        out = out.loc[thr <= thr_max]
+        thr, rec = out["threshold"].astype(float), out["recall"].astype(float)
+    if rec_min is not None:
+        out = out.loc[rec >= rec_min]
+        thr, rec = out["threshold"].astype(float), out["recall"].astype(float)
+    if rec_max is not None:
+        out = out.loc[rec <= rec_max]
+    return out
+
+
+def _require_score_coverage(
+    ep_df: pd.DataFrame,
+    z_df: pd.DataFrame,
+    universe: List[str],
+    ep_combos: List[Combo],
+    z_combos: List[Combo],
+    ep_values: np.ndarray,
+    z_values: np.ndarray,
+) -> None:
+    try:
+        assert_table_coverage(ep_df, universe, "episcore", ep_combos)
+        assert_table_coverage(z_df, universe, "zscore", z_combos)
+        assert_dense_coverage(ep_values, universe, ep_combos, "episcore")
+        assert_dense_coverage(z_values, universe, z_combos, "zscore")
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 def _generate_half_partitions(
@@ -67,7 +124,6 @@ def _generate_half_partitions(
     n_repeats: int,
     rng: np.random.Generator,
 ) -> Tuple[List[np.ndarray], List[np.ndarray]]:
-    """Return per-repeat local index arrays for ref and ezscore reference halves."""
     if pool_size != 2 * half:
         raise ValueError(f"pool_size={pool_size} must equal 2 * half={half}")
     ref_draws: List[np.ndarray] = []
@@ -94,14 +150,25 @@ def _flag_abnormal(scores: np.ndarray, eval_idx: np.ndarray, cutoff: float) -> n
     return (sub > cutoff).any(axis=0).astype(np.int64)
 
 
+def _flag_abnormal_multi(
+    scores: np.ndarray,
+    eval_idx: np.ndarray,
+    cutoffs: Sequence[float],
+) -> np.ndarray:
+    """Return [n_cutoff, n_eval] int flags from max-chr scores."""
+    sub = scores[:, eval_idx]
+    with np.errstate(invalid="ignore"):
+        max_chr = np.nanmax(sub, axis=0)
+    return np.stack([(max_chr > c).astype(np.int64) for c in cutoffs], axis=0)
+
+
 def _compute_ezscore(
     episcore: np.ndarray,
     zscore: np.ndarray,
     ez_ref_idx: np.ndarray,
 ) -> np.ndarray:
-    """Z-normalize episcore + zscore per chromosome over ezscore reference."""
     combined = episcore + zscore
-    n_chr, n_sample = combined.shape
+    n_chr, _n_sample = combined.shape
     ez = np.empty_like(combined)
     for hi in range(n_chr):
         ref_vals = combined[hi, ez_ref_idx]
@@ -115,25 +182,34 @@ def _compute_ezscore(
     return ez
 
 
-def _accumulate_ezscore_common_combos(
+def _accumulate_ez_pairs_multi(
     episcore_all: np.ndarray,
     zscore_all: np.ndarray,
     eval_idx: np.ndarray,
     ez_ref_idx: np.ndarray,
-    cutoff: float,
+    cutoffs: Sequence[float],
+    pairs: Sequence[EzPair],
+) -> np.ndarray:
+    counts = np.zeros((len(cutoffs), eval_idx.size), dtype=np.int64)
+    for ep_i, z_i in pairs:
+        ez = _compute_ezscore(episcore_all[ep_i], zscore_all[z_i], ez_ref_idx)
+        counts += _flag_abnormal_multi(ez, eval_idx, cutoffs)
+    return counts
+
+
+def _build_ez_pairs(
     ep_combos: List[Combo],
     z_combos: List[Combo],
-    common_combos: List[Combo],
-) -> np.ndarray:
+) -> Tuple[List[EzPair], str]:
+    """Prefer identical (thr, recall) pairs; else cartesian product."""
     ep_index = _combo_index(ep_combos)
     z_index = _combo_index(z_combos)
-    counts = np.zeros(eval_idx.size, dtype=np.int64)
-    for combo in common_combos:
-        ep_i = ep_index[combo]
-        z_i = z_index[combo]
-        ez = _compute_ezscore(episcore_all[ep_i], zscore_all[z_i], ez_ref_idx)
-        counts += _flag_abnormal(ez, eval_idx, cutoff)
-    return counts
+    common = sorted(set(ep_combos) & set(z_combos))
+    if common:
+        pairs = [(ep_index[c], z_index[c]) for c in common]
+        return pairs, "intersection"
+    pairs = [(ei, zi) for ei in range(len(ep_combos)) for zi in range(len(z_combos))]
+    return pairs, "cartesian"
 
 
 def _load_fixed_combo_arrays(
@@ -178,29 +254,26 @@ def _load_fixed_combo_arrays(
 @click.option("--total-repeats", default=10000, show_default=True, type=int)
 @click.option("--repeat-start", default=0, show_default=True, type=int)
 @click.option("--repeat-end", default=None, type=int)
-@click.option(
-    "--ref-n",
-    default=DEFAULT_REF_N,
-    show_default=True,
-    type=int,
-    help="Reference half-size; pool must contain exactly 2 * ref_n dev Normal samples",
-)
+@click.option("--ref-n", default=DEFAULT_REF_N, show_default=True, type=int)
 @click.option("--seed", default=42, show_default=True, type=int)
-@click.option("--cutoff", default=DEFAULT_CUTOFF, show_default=True, type=float,
-              help="Abnormality cutoff for episcore and zscore")
-@click.option("--ez-cutoff", default=None, type=float,
-              help="Abnormality cutoff for ezscore (defaults to --cutoff)")
+@click.option("--cutoff", default=DEFAULT_CUTOFF, show_default=True, type=float)
+@click.option("--ez-cutoff-min", default=3.0, show_default=True, type=float)
+@click.option("--ez-cutoff-max", default=4.5, show_default=True, type=float)
+@click.option("--ez-cutoff-step", default=0.1, show_default=True, type=float)
 @click.option("--min-ff", default=0.0, show_default=True, type=float)
-@click.option(
-    "--combo-mode",
-    default="all",
-    show_default=True,
-    type=click.Choice(["all", "fixed"]),
-)
+@click.option("--combo-mode", default="all", type=click.Choice(["all", "fixed"]))
 @click.option("--ep-threshold", default=None, type=float)
 @click.option("--ep-recall", default=None, type=float)
 @click.option("--z-threshold", default=None, type=float)
 @click.option("--z-recall", default=None, type=float)
+@click.option("--ep-threshold-min", default=None, type=float)
+@click.option("--ep-threshold-max", default=None, type=float)
+@click.option("--ep-recall-min", default=None, type=float)
+@click.option("--ep-recall-max", default=None, type=float)
+@click.option("--z-threshold-min", default=None, type=float)
+@click.option("--z-threshold-max", default=None, type=float)
+@click.option("--z-recall-min", default=None, type=float)
+@click.option("--z-recall-max", default=None, type=float)
 def main(
     input_dir: str,
     output_base: str,
@@ -210,16 +283,26 @@ def main(
     ref_n: int,
     seed: int,
     cutoff: float,
-    ez_cutoff: Optional[float],
+    ez_cutoff_min: float,
+    ez_cutoff_max: float,
+    ez_cutoff_step: float,
     min_ff: float,
     combo_mode: str,
     ep_threshold: Optional[float],
     ep_recall: Optional[float],
     z_threshold: Optional[float],
     z_recall: Optional[float],
+    ep_threshold_min: Optional[float],
+    ep_threshold_max: Optional[float],
+    ep_recall_min: Optional[float],
+    ep_recall_max: Optional[float],
+    z_threshold_min: Optional[float],
+    z_threshold_max: Optional[float],
+    z_recall_min: Optional[float],
+    z_recall_max: Optional[float],
 ) -> None:
     """Run reference-free episcore/zscore/ezscore abnormality sweep."""
-    ez_cutoff_val = cutoff if ez_cutoff is None else ez_cutoff
+    ez_cutoffs = _ez_cutoff_grid(ez_cutoff_min, ez_cutoff_max, ez_cutoff_step)
     input_path = Path(input_dir)
     out_root = Path(output_base) / "ref_free_ezscore"
     out_root.mkdir(parents=True, exist_ok=True)
@@ -250,13 +333,13 @@ def main(
     console.print(f"  Input dir      : {input_path}")
     console.print(f"  Output root    : {out_root}")
     console.print(f"  Repeat range   : [{repeat_start}, {repeat_end}) of {total_repeats}")
-    console.print(f"  ref split      : {ref_n} + {ref_n} from dev Normal pool")
+    console.print(f"  ref split      : {ref_n} + {ref_n}")
     console.print(f"  combo-mode     : {combo_mode}")
-    if use_fixed:
-        console.print(f"  episcore combo : threshold={ep_threshold}, recall={ep_recall}")
-        console.print(f"  zscore combo   : threshold={z_threshold}, recall={z_recall}")
     console.print(f"  ep/z cutoff    : {cutoff}")
-    console.print(f"  ez cutoff      : {ez_cutoff_val}")
+    console.print(
+        f"  ez cutoff grid : {ez_cutoffs[0]:g} .. {ez_cutoffs[-1]:g} "
+        f"step {ez_cutoff_step:g} (n={len(ez_cutoffs)})"
+    )
 
     meta = pd.read_csv(input_path / "meta.csv")
     for col in ("sample", "set", "label", "ff_before_mq"):
@@ -269,6 +352,16 @@ def main(
     console.print("[cyan]Loading parquets ...[/cyan]")
     ep_df = pd.read_parquet(input_path / "episcore_grid_search.parquet")
     z_df = pd.read_parquet(input_path / "zscore_grid_search.parquet")
+
+    if not use_fixed:
+        ep_df = _filter_combo_df(
+            ep_df, ep_threshold_min, ep_threshold_max, ep_recall_min, ep_recall_max
+        )
+        z_df = _filter_combo_df(
+            z_df, z_threshold_min, z_threshold_max, z_recall_min, z_recall_max
+        )
+        if ep_df.empty or z_df.empty:
+            raise click.ClickException("Combo filters removed all episcore or zscore rows")
 
     ep_samples = set(ep_df["sample"].astype(str).unique())
     z_samples = set(z_df["sample"].astype(str).unique())
@@ -311,8 +404,11 @@ def main(
         )
         ep_combos: List[Combo] = [(ep_threshold, ep_recall)]
         z_combos = [(z_threshold, z_recall)]
-        common_combos = ep_combos
+        ez_pairs: List[EzPair] = [(0, 0)]
+        ez_pair_mode = "fixed"
         z_array_all = None
+        ep_dense = np.expand_dims(ep_arrays[0], 0)
+        z_dense = np.expand_dims(z_array, 0)
     else:
         ep_combos, ep_arrays = _build_dense(
             ep_df,
@@ -322,8 +418,14 @@ def main(
         )
         z_combos, z_arrays = _build_dense(z_df, ["percentage"], sample_index, chr_index)
         z_array_all = z_arrays[0]
-        common_combos = sorted(set(ep_combos) & set(z_combos))
+        ez_pairs, ez_pair_mode = _build_ez_pairs(ep_combos, z_combos)
+        ep_dense = ep_arrays[0]
+        z_dense = z_array_all
 
+    _require_score_coverage(
+        ep_df, z_df, universe, ep_combos, z_combos, ep_dense, z_dense
+    )
+    console.print("[green]OK[/green] episcore/zscore parquet coverage complete")
     console.print(f"  universe samples : {len(universe)}")
     console.print(f"  dev Normal pool  : {ref_pool_idx.size}")
     console.print(
@@ -332,7 +434,7 @@ def main(
     )
     console.print(f"  episcore combos  : {len(ep_combos)}")
     console.print(f"  zscore combos    : {len(z_combos)}")
-    console.print(f"  ezscore combos   : {len(common_combos)}")
+    console.print(f"  ezscore pairs    : {len(ez_pairs)} ({ez_pair_mode})")
 
     if repeat_start == 0:
         eval_info = pd.DataFrame(
@@ -350,15 +452,27 @@ def main(
             "ez_ref_n": ref_n,
             "normal_pool_size": int(ref_pool_idx.size),
             "cutoff": cutoff,
-            "ez_cutoff": ez_cutoff_val,
+            "ez_cutoff_min": ez_cutoff_min,
+            "ez_cutoff_max": ez_cutoff_max,
+            "ez_cutoff_step": ez_cutoff_step,
+            "ez_cutoffs": ez_cutoffs,
+            "ez_pair_mode": ez_pair_mode,
             "total_repeats": total_repeats,
             "seed": seed,
             "n_ep_combos": len(ep_combos),
             "n_z_combos": len(z_combos),
-            "n_ez_combos": len(common_combos),
+            "n_ez_combos": len(ez_pairs),
             "episcore_denominator": len(ep_combos) * total_repeats,
             "zscore_denominator": len(z_combos) * total_repeats,
-            "ezscore_denominator": len(common_combos) * total_repeats,
+            "ezscore_denominator": len(ez_pairs) * total_repeats,
+            "ep_threshold_min": ep_threshold_min,
+            "ep_threshold_max": ep_threshold_max,
+            "ep_recall_min": ep_recall_min,
+            "ep_recall_max": ep_recall_max,
+            "z_threshold_min": z_threshold_min,
+            "z_threshold_max": z_threshold_max,
+            "z_recall_min": z_recall_min,
+            "z_recall_max": z_recall_max,
         }
         if use_fixed:
             run_config.update(
@@ -383,8 +497,7 @@ def main(
     n_eval = eval_idx.size
     ep_counts = np.zeros(n_eval, dtype=np.int64)
     z_counts = np.zeros(n_eval, dtype=np.int64)
-    ez_counts = np.zeros(n_eval, dtype=np.int64)
-    manifest_rows: List[Dict[str, object]] = []
+    ez_counts = np.zeros((len(ez_cutoffs), n_eval), dtype=np.int64)
 
     for repeat_index in range(repeat_start, repeat_end):
         ref_idx = ref_pool_idx[ref_local_draws[repeat_index]]
@@ -402,7 +515,7 @@ def main(
             ep_step = _flag_abnormal(episcore, eval_idx, cutoff)
             z_step = _flag_abnormal(zscore, eval_idx, cutoff)
             ez = _compute_ezscore(episcore, zscore, ez_ref_idx)
-            ez_step = _flag_abnormal(ez, eval_idx, ez_cutoff_val)
+            ez_step = _flag_abnormal_multi(ez, eval_idx, ez_cutoffs)
         else:
             assert z_array_all is not None
             episcore_all = compute_episcore(
@@ -411,50 +524,32 @@ def main(
             zscore_all = compute_zscore(z_array_all, ref_idx)
             ep_step = _accumulate_combo_flags(episcore_all, eval_idx, cutoff)
             z_step = _accumulate_combo_flags(zscore_all, eval_idx, cutoff)
-            ez_step = _accumulate_ezscore_common_combos(
+            ez_step = _accumulate_ez_pairs_multi(
                 episcore_all,
                 zscore_all,
                 eval_idx,
                 ez_ref_idx,
-                ez_cutoff_val,
-                ep_combos,
-                z_combos,
-                common_combos,
+                ez_cutoffs,
+                ez_pairs,
             )
 
         ep_counts += ep_step
         z_counts += z_step
         ez_counts += ez_step
-        manifest_rows.append(
-            {
-                "repeat_index": repeat_index,
-                "n_ref": int(ref_idx.size),
-                "n_ez_ref": int(ez_ref_idx.size),
-                "n_eval_episcore_abnormal_total": int(ep_step.sum()),
-                "n_eval_zscore_abnormal_total": int(z_step.sum()),
-                "n_eval_ezscore_abnormal_total": int(ez_step.sum()),
-            }
-        )
         done = repeat_index - repeat_start + 1
         if done % 20 == 0 or done == repeat_end - repeat_start:
             console.print(f"  completed repeat {repeat_index + 1}/{repeat_end}")
 
-    slice_df = pd.DataFrame(
-        {
-            "eval_pos": np.arange(n_eval, dtype=np.int64),
-            "episcore_abnormal_count": ep_counts,
-            "zscore_abnormal_count": z_counts,
-            "ezscore_abnormal_count": ez_counts,
-        }
-    )
+    slice_data = {
+        "eval_pos": np.arange(n_eval, dtype=np.int64),
+        "episcore_abnormal_count": ep_counts,
+        "zscore_abnormal_count": z_counts,
+    }
+    for i, c in enumerate(ez_cutoffs):
+        slice_data[_ez_count_col(c)] = ez_counts[i]
     slice_path = out_root / f"abnormality_counts_{repeat_start}_{repeat_end}.tsv"
-    slice_df.to_csv(slice_path, sep="\t", index=False)
-
-    manifest_path = out_root / f"manifest_{repeat_start}_{repeat_end}.tsv"
-    pd.DataFrame(manifest_rows).to_csv(manifest_path, sep="\t", index=False)
-    console.print(f"[green]Done[/green] {repeat_end - repeat_start} repeats")
-    console.print(f"  -> {slice_path}")
-    console.print(f"  -> {manifest_path}")
+    pd.DataFrame(slice_data).to_csv(slice_path, sep="\t", index=False)
+    console.print(f"[green]Done[/green] {repeat_end - repeat_start} repeats -> {slice_path}")
 
 
 if __name__ == "__main__":

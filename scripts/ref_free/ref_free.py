@@ -50,6 +50,11 @@ REF40_DIR = SCRIPT_DIR.parent / "ref_explore_plus_grid_search"
 if str(REF40_DIR) not in sys.path:
     sys.path.insert(0, str(REF40_DIR))
 
+from grid_coverage import (  # noqa: E402
+    assert_dense_coverage,
+    assert_table_coverage,
+    majority_combos,
+)
 from grid_search_ref40 import (  # noqa: E402
     CHR_LIST,
     _build_dense,
@@ -63,6 +68,35 @@ console = Console()
 
 DEFAULT_CUTOFF = 3.0
 Combo = Tuple[float, float]
+
+
+def _require_score_coverage(
+    ep_df: pd.DataFrame,
+    z_df: pd.DataFrame,
+    universe: List[str],
+    ep_combos: List[Combo],
+    z_combos: List[Combo],
+    ep_values: np.ndarray,
+    z_values: np.ndarray,
+    *,
+    use_fixed: bool,
+) -> None:
+    """Fail loudly if any analysis sample lacks required combo coverage."""
+    try:
+        if use_fixed:
+            assert_table_coverage(ep_df, universe, "episcore", ep_combos)
+            assert_table_coverage(z_df, universe, "zscore", z_combos)
+        else:
+            assert_table_coverage(
+                ep_df, universe, "episcore", majority_combos(ep_df, universe)
+            )
+            assert_table_coverage(
+                z_df, universe, "zscore", majority_combos(z_df, universe)
+            )
+        assert_dense_coverage(ep_values, universe, ep_combos, "episcore")
+        assert_dense_coverage(z_values, universe, z_combos, "zscore")
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 def _combo_list(df: pd.DataFrame) -> List[Combo]:
@@ -333,6 +367,8 @@ def main(
         z_combos = [(z_threshold, z_recall)]
         union_combos = ep_combos
         z_array_all = None
+        ep_dense = np.expand_dims(ep_arrays[0], 0)
+        z_dense = np.expand_dims(z_array, 0)
     else:
         ep_combos, ep_arrays = _build_dense(
             ep_df,
@@ -343,6 +379,20 @@ def main(
         z_combos, z_arrays = _build_dense(z_df, ["percentage"], sample_index, chr_index)
         z_array_all = z_arrays[0]
         union_combos = sorted(set(ep_combos) | set(z_combos))
+        ep_dense = ep_arrays[0]
+        z_dense = z_array_all
+
+    _require_score_coverage(
+        ep_df,
+        z_df,
+        universe,
+        ep_combos,
+        z_combos,
+        ep_dense,
+        z_dense,
+        use_fixed=use_fixed,
+    )
+    console.print("[green]OK[/green] episcore/zscore parquet coverage complete")
 
     console.print(f"  universe samples : {len(universe)}")
     console.print(f"  dev Normal pool  : {ref_pool_idx.size}")

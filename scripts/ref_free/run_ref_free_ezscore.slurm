@@ -2,14 +2,15 @@
 #SBATCH -J ref_free_ezscore
 #SBATCH --partition=cn-long
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
+#SBATCH --mem=48G
+#SBATCH --time=06:00:00
 #SBATCH -o logs/%x_%a.log
 #SBATCH -e logs/%x_%a.log
 
 set -euo pipefail
 
 INPUT_DIR=${1:-/lustre1/cqyi/AIPT_2.0/data/meta/episcore/20260621-ref_40_rebuild_consider_lib_ng}
-OUTPUT_BASE=${2:-/lustre1/cqyi/AIPT_2.0/results/episcore_output/20260715-ref_free_ezscore_all}
+OUTPUT_BASE=${2:?OUTPUT_BASE required}
 TOTAL_REPEATS=${TOTAL_REPEATS:-10000}
 REPEATS_PER_JOB=${REPEATS_PER_JOB:-200}
 REF_N=${REF_N:-48}
@@ -19,7 +20,17 @@ EP_RECALL=${EP_RECALL:-}
 Z_THRESHOLD=${Z_THRESHOLD:-}
 Z_RECALL=${Z_RECALL:-}
 CUTOFF=${CUTOFF:-3.0}
-EZ_CUTOFF=${EZ_CUTOFF:-}
+EZ_CUTOFF_MIN=${EZ_CUTOFF_MIN:-3.0}
+EZ_CUTOFF_MAX=${EZ_CUTOFF_MAX:-4.5}
+EZ_CUTOFF_STEP=${EZ_CUTOFF_STEP:-0.1}
+EP_THRESHOLD_MIN=${EP_THRESHOLD_MIN:-}
+EP_THRESHOLD_MAX=${EP_THRESHOLD_MAX:-}
+EP_RECALL_MIN=${EP_RECALL_MIN:-}
+EP_RECALL_MAX=${EP_RECALL_MAX:-}
+Z_THRESHOLD_MIN=${Z_THRESHOLD_MIN:-}
+Z_THRESHOLD_MAX=${Z_THRESHOLD_MAX:-}
+Z_RECALL_MIN=${Z_RECALL_MIN:-}
+Z_RECALL_MAX=${Z_RECALL_MAX:-}
 SEED=${SEED:-42}
 MIN_FF=${MIN_FF:-0}
 SIF=${SIF:-/lustre1/cqyi/AIPT_2.0/workflow/episcore/containers/common_tools.sif}
@@ -34,28 +45,17 @@ if [ "$REPEAT_END" -gt "$TOTAL_REPEATS" ]; then
     REPEAT_END=$TOTAL_REPEATS
 fi
 if [ "$REPEAT_START" -ge "$TOTAL_REPEATS" ]; then
-    echo "[$(date)] array=${SLURM_ARRAY_TASK_ID}: repeat_start=${REPEAT_START} >= total=${TOTAL_REPEATS}, nothing to do"
+    echo "[$(date)] array=${SLURM_ARRAY_TASK_ID}: nothing to do"
     exit 0
 fi
 
-export OMP_NUM_THREADS=1
-export OPENBLAS_NUM_THREADS=1
-export MKL_NUM_THREADS=1
-export NUMEXPR_NUM_THREADS=1
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+export PYTHONUNBUFFERED=1
 
 echo "[$(date)] ref_free_ezscore array=${SLURM_ARRAY_TASK_ID} host=$(hostname)"
-echo "  input dir       : $INPUT_DIR"
-echo "  output base     : $OUTPUT_BASE"
-echo "  repeat range    : [$REPEAT_START, $REPEAT_END) of $TOTAL_REPEATS"
-echo "  ref split       : ${REF_N}+${REF_N} dev Normal"
-echo "  combo-mode      : $COMBO_MODE"
-
-echo "  ep/z cutoff     : $CUTOFF"
-if [ -n "$EZ_CUTOFF" ]; then
-    echo "  ez cutoff       : $EZ_CUTOFF"
-else
-    echo "  ez cutoff       : $CUTOFF (same as ep/z)"
-fi
+echo "  output base : $OUTPUT_BASE"
+echo "  repeats     : [$REPEAT_START, $REPEAT_END) of $TOTAL_REPEATS"
+echo "  combo-mode  : $COMBO_MODE"
 
 PY_ARGS=(
     --input-dir "$INPUT_DIR"
@@ -68,10 +68,10 @@ PY_ARGS=(
     --cutoff "$CUTOFF"
     --min-ff "$MIN_FF"
     --combo-mode "$COMBO_MODE"
+    --ez-cutoff-min "$EZ_CUTOFF_MIN"
+    --ez-cutoff-max "$EZ_CUTOFF_MAX"
+    --ez-cutoff-step "$EZ_CUTOFF_STEP"
 )
-if [ -n "$EZ_CUTOFF" ]; then
-    PY_ARGS+=(--ez-cutoff "$EZ_CUTOFF")
-fi
 if [ "$COMBO_MODE" = "fixed" ]; then
     PY_ARGS+=(
         --ep-threshold "$EP_THRESHOLD"
@@ -79,6 +79,15 @@ if [ "$COMBO_MODE" = "fixed" ]; then
         --z-threshold "$Z_THRESHOLD"
         --z-recall "$Z_RECALL"
     )
+else
+    [[ -n "$EP_THRESHOLD_MIN" ]] && PY_ARGS+=(--ep-threshold-min "$EP_THRESHOLD_MIN")
+    [[ -n "$EP_THRESHOLD_MAX" ]] && PY_ARGS+=(--ep-threshold-max "$EP_THRESHOLD_MAX")
+    [[ -n "$EP_RECALL_MIN" ]] && PY_ARGS+=(--ep-recall-min "$EP_RECALL_MIN")
+    [[ -n "$EP_RECALL_MAX" ]] && PY_ARGS+=(--ep-recall-max "$EP_RECALL_MAX")
+    [[ -n "$Z_THRESHOLD_MIN" ]] && PY_ARGS+=(--z-threshold-min "$Z_THRESHOLD_MIN")
+    [[ -n "$Z_THRESHOLD_MAX" ]] && PY_ARGS+=(--z-threshold-max "$Z_THRESHOLD_MAX")
+    [[ -n "$Z_RECALL_MIN" ]] && PY_ARGS+=(--z-recall-min "$Z_RECALL_MIN")
+    [[ -n "$Z_RECALL_MAX" ]] && PY_ARGS+=(--z-recall-max "$Z_RECALL_MAX")
 fi
 
 singularity exec -B /lustre1,/lustre2,/appsnew "$SIF" \
