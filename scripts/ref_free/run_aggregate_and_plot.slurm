@@ -10,14 +10,15 @@
 set -euo pipefail
 
 OUTPUT_BASE=${1:?OUTPUT_BASE required}
-TITLE=${2:-48+48 reference-free signal ratio}
+TITLE=${2:-40+40 reference-free signal ratio}
+FF_MIN=${3:-0.01}
 SIF=${SIF:-/lustre1/cqyi/AIPT_2.0/workflow/episcore/containers/common_tools.sif}
 
 SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 cd "$SCRIPT_DIR"
 mkdir -p logs
 
-echo "[$(date)] Aggregate + plot for $OUTPUT_BASE"
+echo "[$(date)] Aggregate + plot for $OUTPUT_BASE (ff-min=$FF_MIN)"
 
 singularity exec -B /lustre1,/lustre2,/appsnew "$SIF" \
     python3 aggregate_ref_free_ezscore.py --output-base "$OUTPUT_BASE"
@@ -25,6 +26,7 @@ singularity exec -B /lustre1,/lustre2,/appsnew "$SIF" \
 singularity exec -B /lustre1,/lustre2,/appsnew "$SIF" \
     python3 plot_ref_free_interactive.py \
         --result-dir "$OUTPUT_BASE" \
-        --title "$TITLE"
+        --title "$TITLE" \
+        --ff-min "$FF_MIN"
 
 echo "[$(date)] Done"

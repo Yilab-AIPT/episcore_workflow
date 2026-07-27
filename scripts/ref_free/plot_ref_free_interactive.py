@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build interactive Plotly HTML for 48+48 ref_free signal-ratio sweeps."""
+"""Build interactive Plotly HTML for 40+40 ref_free signal-ratio sweeps."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from rich.console import Console
 console = Console()
 
 PALETTE = {"Normal": "#9e9e9e", "trisomy": "#d62728"}
-FF_MIN = 0.0092
+DEFAULT_FF_MIN = 0.01  # 1% fetal fraction
 
 
 def _prepare(df: pd.DataFrame) -> pd.DataFrame:
@@ -64,6 +64,7 @@ def build_figure(
     ez_cutoffs: list[float],
     title: str,
     subtitle: str,
+    ff_min: float = DEFAULT_FF_MIN,
 ) -> go.Figure:
     df = _prepare(df)
     default_ez = 3.0 if 3.0 in ez_cutoffs else ez_cutoffs[0]
@@ -86,7 +87,7 @@ def build_figure(
         fig.add_trace(tr, row=1, col=3)
 
     # FF-filtered traces (indices 6-11), hidden by default
-    df_ff = df[df["ff_before_mq"] > FF_MIN]
+    df_ff = df[df["ff_before_mq"] > ff_min]
     for tr in _scatter_traces(df_ff, "episcore_signal_ratio", visible=False):
         fig.add_trace(tr, row=1, col=1)
     for tr in _scatter_traces(df_ff, "zscore_signal_ratio", visible=False):
@@ -153,7 +154,7 @@ def build_figure(
                     args=[{"visible": vis_all}],
                 ),
                 dict(
-                    label=f"ff > {FF_MIN * 100:.2f}%",
+                    label=f"ff > {ff_min * 100:.2f}%",
                     method="update",
                     args=[{"visible": vis_ff}],
                 ),
@@ -201,8 +202,10 @@ def build_figure(
     type=click.Path(path_type=Path),
     help="Default: <result-dir>/plots/signal_ratio.html",
 )
-@click.option("--title", default="48+48 reference-free signal ratio", show_default=True)
-def main(result_dir: Path, output_html: Path | None, title: str) -> None:
+@click.option("--title", default="40+40 reference-free signal ratio", show_default=True)
+@click.option("--ff-min", default=DEFAULT_FF_MIN, show_default=True, type=float,
+              help="Fetal-fraction filter used by the plot toggle button")
+def main(result_dir: Path, output_html: Path | None, title: str, ff_min: float) -> None:
     ref_dir = result_dir / "ref_free_ezscore"
     scores = ref_dir / "abnormality_signal_ratio.tsv"
     config_path = ref_dir / "run_config.json"
@@ -228,7 +231,7 @@ def main(result_dir: Path, output_html: Path | None, title: str) -> None:
             f"ez pairs={config.get('n_ez_combos')} ({config.get('ez_pair_mode')})"
         )
 
-    fig = build_figure(df, ez_cutoffs, title=title, subtitle=subtitle)
+    fig = build_figure(df, ez_cutoffs, title=title, subtitle=subtitle, ff_min=ff_min)
     out = output_html or (result_dir / "plots" / "signal_ratio.html")
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.write_html(str(out), include_plotlyjs="cdn", full_html=True)

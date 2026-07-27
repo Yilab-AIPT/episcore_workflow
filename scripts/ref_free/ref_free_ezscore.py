@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-Reference-free episcore / zscore / ezscore abnormality signal sweep (48+48).
+Reference-free episcore / zscore / ezscore abnormality signal sweep (40+40).
 
 For each repeat:
-    1. Partition 96 dev Normal samples into ref_n + ref_n halves.
-    2. Compute episcore / zscore vs the first half.
-    3. Compute ezscore = z-normalize(episcore + zscore) vs the second half.
+    1. From the 96-sample dev Normal pool, draw two disjoint groups of
+       ``ref_n`` (default 40): episcore/zscore refs and ezscore refs
+       (16 pool samples unused each repeat).
+    2. Compute episcore / zscore vs the first group.
+    3. Compute ezscore = z-normalize(episcore + zscore) vs the second group.
     4. Flag eval samples when any chromosome exceeds the cutoff.
 
 Episcore/zscore use ``--cutoff``. Ezscore is counted on a cutoff grid
@@ -52,7 +54,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 console = Console()
 
 DEFAULT_CUTOFF = 3.0
-DEFAULT_REF_N = 48
+DEFAULT_REF_N = 40
 Combo = Tuple[float, float]
 EzPair = Tuple[int, int]  # (ep_combo_index, z_combo_index)
 
@@ -124,14 +126,19 @@ def _generate_half_partitions(
     n_repeats: int,
     rng: np.random.Generator,
 ) -> Tuple[List[np.ndarray], List[np.ndarray]]:
-    if pool_size != 2 * half:
-        raise ValueError(f"pool_size={pool_size} must equal 2 * half={half}")
+    """Draw two disjoint halves of size ``half`` from a larger pool.
+
+    When ``pool_size > 2 * half``, the remaining samples are unused that repeat.
+    """
+    need = 2 * half
+    if pool_size < need:
+        raise ValueError(f"pool_size={pool_size} must be >= 2 * half={need}")
     ref_draws: List[np.ndarray] = []
     ez_draws: List[np.ndarray] = []
     for _ in range(n_repeats):
         perm = rng.permutation(pool_size)
         ref_draws.append(perm[:half].astype(np.int64, copy=False))
-        ez_draws.append(perm[half:].astype(np.int64, copy=False))
+        ez_draws.append(perm[half:need].astype(np.int64, copy=False))
     return ref_draws, ez_draws
 
 
@@ -333,7 +340,7 @@ def main(
     console.print(f"  Input dir      : {input_path}")
     console.print(f"  Output root    : {out_root}")
     console.print(f"  Repeat range   : [{repeat_start}, {repeat_end}) of {total_repeats}")
-    console.print(f"  ref split      : {ref_n} + {ref_n}")
+    console.print(f"  ref split      : {ref_n} + {ref_n} (from 96-sample pool)")
     console.print(f"  combo-mode     : {combo_mode}")
     console.print(f"  ep/z cutoff    : {cutoff}")
     console.print(
@@ -386,11 +393,11 @@ def main(
     ref_pool_idx = np.flatnonzero(is_dev_normal)
     eval_idx = np.flatnonzero(eval_mask)
 
-    expected_pool = 2 * ref_n
-    if ref_pool_idx.size != expected_pool:
+    min_pool = 2 * ref_n
+    if ref_pool_idx.size < min_pool:
         raise click.ClickException(
-            f"Expected exactly {expected_pool} dev Normal samples for a {ref_n}+{ref_n} "
-            f"split, found {ref_pool_idx.size}"
+            f"Need at least {min_pool} dev Normal samples for a {ref_n}+{ref_n} "
+            f"draw, found {ref_pool_idx.size}"
         )
     if eval_idx.size == 0:
         raise click.ClickException("No evaluation samples (dev trisomy + test)")
