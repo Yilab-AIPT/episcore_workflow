@@ -2,8 +2,8 @@
 #SBATCH -J ref_free_ezscore
 #SBATCH --partition=cn-long
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=48G
-#SBATCH --time=06:00:00
+#SBATCH --mem=64G
+#SBATCH --time=12:00:00
 #SBATCH -o logs/%x_%a.log
 #SBATCH -e logs/%x_%a.log
 
@@ -11,8 +11,8 @@ set -euo pipefail
 
 INPUT_DIR=${1:-/lustre1/cqyi/AIPT_2.0/data/meta/episcore/20260621-ref_40_rebuild_consider_lib_ng}
 OUTPUT_BASE=${2:?OUTPUT_BASE required}
-TOTAL_REPEATS=${TOTAL_REPEATS:-10000}
-REPEATS_PER_JOB=${REPEATS_PER_JOB:-200}
+TOTAL_REPEATS=${TOTAL_REPEATS:-100000}
+REPEATS_PER_JOB=${REPEATS_PER_JOB:-2000}
 REF_N=${REF_N:-40}
 COMBO_MODE=${COMBO_MODE:-all}
 EP_THRESHOLD=${EP_THRESHOLD:-}
@@ -33,6 +33,8 @@ Z_RECALL_MIN=${Z_RECALL_MIN:-}
 Z_RECALL_MAX=${Z_RECALL_MAX:-}
 SEED=${SEED:-42}
 MIN_FF=${MIN_FF:-0}
+STORE_PAIR_COUNTS=${STORE_PAIR_COUNTS:-0}
+COMPRESS=${COMPRESS:-1}
 SIF=${SIF:-/lustre1/cqyi/AIPT_2.0/workflow/episcore/containers/common_tools.sif}
 
 SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
@@ -55,7 +57,7 @@ export PYTHONUNBUFFERED=1
 echo "[$(date)] ref_free_ezscore array=${SLURM_ARRAY_TASK_ID} host=$(hostname)"
 echo "  output base : $OUTPUT_BASE"
 echo "  repeats     : [$REPEAT_START, $REPEAT_END) of $TOTAL_REPEATS"
-echo "  combo-mode  : $COMBO_MODE"
+echo "  combo-mode  : $COMBO_MODE store_pair_counts=$STORE_PAIR_COUNTS compress=$COMPRESS"
 
 PY_ARGS=(
     --input-dir "$INPUT_DIR"
@@ -72,6 +74,16 @@ PY_ARGS=(
     --ez-cutoff-max "$EZ_CUTOFF_MAX"
     --ez-cutoff-step "$EZ_CUTOFF_STEP"
 )
+if [ "$COMPRESS" = "1" ]; then
+    PY_ARGS+=(--compress)
+else
+    PY_ARGS+=(--no-compress)
+fi
+if [ "$STORE_PAIR_COUNTS" = "1" ]; then
+    PY_ARGS+=(--store-pair-counts)
+else
+    PY_ARGS+=(--no-store-pair-counts)
+fi
 if [ "$COMBO_MODE" = "fixed" ]; then
     PY_ARGS+=(
         --ep-threshold "$EP_THRESHOLD"

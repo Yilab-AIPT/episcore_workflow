@@ -24,6 +24,7 @@ Combo modes:
 from __future__ import annotations
 
 import json
+import re
 import sys
 import warnings
 from pathlib import Path
@@ -49,6 +50,8 @@ from grid_search_ref40 import (  # noqa: E402
     compute_episcore,
     compute_zscore,
 )
+
+from val_blacklist import VAL_BLACKLIST  # noqa: E402
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 console = Console()
@@ -196,11 +199,17 @@ def _accumulate_ez_pairs_multi(
     ez_ref_idx: np.ndarray,
     cutoffs: Sequence[float],
     pairs: Sequence[EzPair],
+    *,
+    per_pair_out: Optional[np.ndarray] = None,
 ) -> np.ndarray:
+    """Accumulate ez flags. If ``per_pair_out`` is [n_pairs, n_cutoffs, n_eval], fill it."""
     counts = np.zeros((len(cutoffs), eval_idx.size), dtype=np.int64)
-    for ep_i, z_i in pairs:
+    for p_i, (ep_i, z_i) in enumerate(pairs):
         ez = _compute_ezscore(episcore_all[ep_i], zscore_all[z_i], ez_ref_idx)
-        counts += _flag_abnormal_multi(ez, eval_idx, cutoffs)
+        step = _flag_abnormal_multi(ez, eval_idx, cutoffs)
+        counts += step
+        if per_pair_out is not None:
+            per_pair_out[p_i] += step.astype(np.int32, copy=False)
     return counts
 
 
@@ -281,6 +290,18 @@ def _load_fixed_combo_arrays(
 @click.option("--z-threshold-max", default=None, type=float)
 @click.option("--z-recall-min", default=None, type=float)
 @click.option("--z-recall-max", default=None, type=float)
+@click.option(
+    "--store-pair-counts/--no-store-pair-counts",
+    default=False,
+    show_default=True,
+    help="For combo-mode=all, also write per-ez-pair counts (compressed) for subset search",
+)
+@click.option(
+    "--compress/--no-compress",
+    default=True,
+    show_default=True,
+    help="Write slice counts as compressed .npz.npz instead of .tsv",
+)
 def main(
     input_dir: str,
     output_base: str,
@@ -307,6 +328,8 @@ def main(
     z_threshold_max: Optional[float],
     z_recall_min: Optional[float],
     z_recall_max: Optional[float],
+    store_pair_counts: bool,
+    compress: bool,
 ) -> None:
     """Run reference-free episcore/zscore/ezscore abnormality sweep."""
     ez_cutoffs = _ez_cutoff_grid(ez_cutoff_min, ez_cutoff_max, ez_cutoff_step)
@@ -386,10 +409,17 @@ def main(
     label_arr = meta_idx["label"].astype(str).to_numpy()
     ff_arr = pd.to_numeric(meta_idx["ff_before_mq"], errors="coerce").to_numpy()
 
-    is_dev_normal = (set_arr == "dev") & (label_arr == "Normal")
-    is_dev_trisomy = (set_arr == "dev") & np.char.startswith(label_arr.astype(str), "T")
+    label_str = label_arr.astype(str)
+    is_trisomy = np.array([bool(re.match(r"^T\d", s)) for s in label_str])
+    is_normal = label_str == "Normal"
+    is_dev_normal = (set_arr == "dev") & is_normal
+    is_dev_trisomy = (set_arr == "dev") & is_trisomy
     is_test = set_arr == "test"
-    eval_mask = is_dev_trisomy | is_test
+    # Independent validation samples tagged set=val (Normal or Trisomy only)
+    sample_arr = np.asarray(universe, dtype=str)
+    not_blacklisted = ~np.isin(sample_arr, list(VAL_BLACKLIST))
+    is_val = (set_arr == "val") & (is_normal | is_trisomy) & not_blacklisted
+    eval_mask = is_dev_trisomy | is_test | is_val
     ref_pool_idx = np.flatnonzero(is_dev_normal)
     eval_idx = np.flatnonzero(eval_mask)
 
@@ -437,7 +467,8 @@ def main(
     console.print(f"  dev Normal pool  : {ref_pool_idx.size}")
     console.print(
         f"  eval samples     : {eval_idx.size} "
-        f"(dev trisomy={int(is_dev_trisomy.sum())}, test={int(is_test.sum())})"
+        f"(dev trisomy={int(is_dev_trisomy.sum())}, test={int(is_test.sum())}, "
+        f"val={int(is_val.sum())})"
     )
     console.print(f"  episcore combos  : {len(ep_combos)}")
     console.print(f"  zscore combos    : {len(z_combos)}")
@@ -480,6 +511,9 @@ def main(
             "z_threshold_max": z_threshold_max,
             "z_recall_min": z_recall_min,
             "z_recall_max": z_recall_max,
+            "store_pair_counts": bool(store_pair_counts and not use_fixed),
+            "compress": compress,
+            "n_val_samples": int(is_val.sum()),
         }
         if use_fixed:
             run_config.update(
@@ -490,6 +524,10 @@ def main(
                     "z_recall": z_recall,
                 }
             )
+        else:
+            run_config["ez_pairs"] = [[int(a), int(b)] for a, b in ez_pairs]
+            run_config["ep_combos"] = [[float(a), float(b)] for a, b in ep_combos]
+            run_config["z_combos"] = [[float(a), float(b)] for a, b in z_combos]
         (out_root / "run_config.json").write_text(json.dumps(run_config, indent=2) + "\n")
         console.print(f"[green]OK[/green] Wrote {out_root / 'eval_samples.tsv'}")
 
@@ -505,6 +543,12 @@ def main(
     ep_counts = np.zeros(n_eval, dtype=np.int64)
     z_counts = np.zeros(n_eval, dtype=np.int64)
     ez_counts = np.zeros((len(ez_cutoffs), n_eval), dtype=np.int64)
+    do_pairs = bool(store_pair_counts and not use_fixed)
+    pair_counts = (
+        np.zeros((len(ez_pairs), len(ez_cutoffs), n_eval), dtype=np.int32)
+        if do_pairs
+        else None
+    )
 
     for repeat_index in range(repeat_start, repeat_end):
         ref_idx = ref_pool_idx[ref_local_draws[repeat_index]]
@@ -538,24 +582,39 @@ def main(
                 ez_ref_idx,
                 ez_cutoffs,
                 ez_pairs,
+                per_pair_out=pair_counts,
             )
 
         ep_counts += ep_step
         z_counts += z_step
         ez_counts += ez_step
         done = repeat_index - repeat_start + 1
-        if done % 20 == 0 or done == repeat_end - repeat_start:
+        if done % 50 == 0 or done == repeat_end - repeat_start:
             console.print(f"  completed repeat {repeat_index + 1}/{repeat_end}")
 
-    slice_data = {
-        "eval_pos": np.arange(n_eval, dtype=np.int64),
-        "episcore_abnormal_count": ep_counts,
-        "zscore_abnormal_count": z_counts,
-    }
-    for i, c in enumerate(ez_cutoffs):
-        slice_data[_ez_count_col(c)] = ez_counts[i]
-    slice_path = out_root / f"abnormality_counts_{repeat_start}_{repeat_end}.tsv"
-    pd.DataFrame(slice_data).to_csv(slice_path, sep="\t", index=False)
+    stem = f"abnormality_counts_{repeat_start}_{repeat_end}"
+    if compress:
+        payload = {
+            "eval_pos": np.arange(n_eval, dtype=np.int64),
+            "episcore_abnormal_count": ep_counts,
+            "zscore_abnormal_count": z_counts,
+            "ez_cutoffs": np.asarray(ez_cutoffs, dtype=np.float64),
+            "ezscore_abnormal_count": ez_counts.astype(np.int64, copy=False),
+        }
+        if pair_counts is not None:
+            payload["pair_abnormal_count"] = pair_counts
+        slice_path = out_root / f"{stem}.npz"
+        np.savez_compressed(slice_path, **payload)
+    else:
+        slice_data = {
+            "eval_pos": np.arange(n_eval, dtype=np.int64),
+            "episcore_abnormal_count": ep_counts,
+            "zscore_abnormal_count": z_counts,
+        }
+        for i, c in enumerate(ez_cutoffs):
+            slice_data[_ez_count_col(c)] = ez_counts[i]
+        slice_path = out_root / f"{stem}.tsv"
+        pd.DataFrame(slice_data).to_csv(slice_path, sep="\t", index=False)
     console.print(f"[green]Done[/green] {repeat_end - repeat_start} repeats -> {slice_path}")
 
 

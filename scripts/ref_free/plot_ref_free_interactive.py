@@ -12,16 +12,22 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from rich.console import Console
 
+from separation import format_sep_pair, separation_index
+from val_blacklist import drop_blacklisted
+
 console = Console()
 
-PALETTE = {"Normal": "#9e9e9e", "trisomy": "#d62728"}
-DEFAULT_FF_MIN = 0.01  # 1% fetal fraction
+MARKER = {
+    "Normal": dict(color="#9e9e9e", size=7, opacity=0.55),
+    "trisomy": dict(color="#d62728", size=9, opacity=0.95),
+}
+DEFAULT_FF_MIN = 0.01
 
 
 def _prepare(df: pd.DataFrame) -> pd.DataFrame:
-    out = df.copy()
+    out = drop_blacklisted(df)
     out["ff_before_mq"] = pd.to_numeric(out["ff_before_mq"], errors="coerce")
-    out["is_trisomy"] = out["label"].astype(str).str.startswith("T")
+    out["is_trisomy"] = out["label"].astype(str).str.match(r"^T\d")
     out["status"] = out["is_trisomy"].map({True: "trisomy", False: "Normal"})
     return out
 
@@ -38,7 +44,7 @@ def _scatter_traces(
     showlegend: bool = False,
 ) -> list:
     traces = []
-    for status, color in PALETTE.items():
+    for status in ("Normal", "trisomy"):
         sub = df[df["status"] == status]
         traces.append(
             go.Scatter(
@@ -48,7 +54,7 @@ def _scatter_traces(
                 name=status,
                 legendgroup=status,
                 showlegend=showlegend,
-                marker=dict(color=color, size=8, opacity=0.85),
+                marker=MARKER[status],
                 text=sub["sample"],
                 hovertemplate=(
                     "%{text}<br>ff=%{x:.4f}<br>ratio=%{y:.4f}<extra>" + status + "</extra>"
@@ -67,8 +73,28 @@ def build_figure(
     ff_min: float = DEFAULT_FF_MIN,
 ) -> go.Figure:
     df = _prepare(df)
+    # Prefer eval (non-val) for the 3-panel overview
+    if "set" in df.columns:
+        df = df[df["set"].astype(str).ne("val")].copy()
+
     default_ez = 3.0 if 3.0 in ez_cutoffs else ez_cutoffs[0]
     ez_col0 = _ez_ratio_col(default_ez)
+
+    df_ff = df[df["ff_before_mq"] >= ff_min]
+    sep_ep = separation_index(df_ff, "episcore_signal_ratio", ff_min=0.0)
+    sep_z = separation_index(df_ff, "zscore_signal_ratio", ff_min=0.0)
+    sep_ez = {
+        c: separation_index(df_ff, _ez_ratio_col(c), ff_min=0.0) for c in ez_cutoffs
+    }
+
+    def _full_title(c: float) -> str:
+        se = sep_ez.get(c, {})
+        return (
+            f"{title}<br><sup>{subtitle}</sup><br>"
+            f"<sup>ff≥{ff_min*100:.0f}% · cutoff={c:g} · "
+            f"ep [{format_sep_pair(sep_ep)}] · z [{format_sep_pair(sep_z)}] · "
+            f"ez [{format_sep_pair(se)}]</sup>"
+        )
 
     fig = make_subplots(
         rows=1,
@@ -78,7 +104,6 @@ def build_figure(
         horizontal_spacing=0.06,
     )
 
-    # Base traces for all samples (indices 0-5): ep N/T, z N/T, ez N/T
     for tr in _scatter_traces(df, "episcore_signal_ratio", showlegend=True):
         fig.add_trace(tr, row=1, col=1)
     for tr in _scatter_traces(df, "zscore_signal_ratio"):
@@ -86,8 +111,6 @@ def build_figure(
     for tr in _scatter_traces(df, ez_col0):
         fig.add_trace(tr, row=1, col=3)
 
-    # FF-filtered traces (indices 6-11), hidden by default
-    df_ff = df[df["ff_before_mq"] > ff_min]
     for tr in _scatter_traces(df_ff, "episcore_signal_ratio", visible=False):
         fig.add_trace(tr, row=1, col=1)
     for tr in _scatter_traces(df_ff, "zscore_signal_ratio", visible=False):
@@ -95,10 +118,7 @@ def build_figure(
     for tr in _scatter_traces(df_ff, ez_col0, visible=False):
         fig.add_trace(tr, row=1, col=3)
 
-    n_base = 6  # all-sample ep/z/ez
-    n_ff = 6
-
-    # Precompute ez y-data for all cutoffs (all-sample and ff-filtered)
+    n_base, n_ff = 6, 6
     ez_y_all = {}
     ez_y_ff = {}
     for c in ez_cutoffs:
@@ -114,13 +134,11 @@ def build_figure(
             "trisomy": df_ff.loc[df_ff["is_trisomy"], col].tolist(),
         }
 
-    # Slider steps update only ezscore traces (indices 4,5 for all; 10,11 for ff)
     steps = []
     for c in ez_cutoffs:
-        # When all-sample visible: update traces 4,5; when ff: 10,11 — update both
         steps.append(
             dict(
-                method="restyle",
+                method="update",
                 args=[
                     {
                         "y": [
@@ -130,13 +148,13 @@ def build_figure(
                             ez_y_ff[c]["trisomy"],
                         ]
                     },
+                    {"title": {"text": _full_title(c)}},
                     [4, 5, 10, 11],
                 ],
                 label=f"{c:g}",
             )
         )
 
-    # Filter buttons: toggle visibility of all-sample vs ff-filtered groups
     vis_all = [True] * n_base + [False] * n_ff
     vis_ff = [False] * n_base + [True] * n_ff
     updatemenus = [
@@ -148,13 +166,9 @@ def build_figure(
             xanchor="left",
             yanchor="top",
             buttons=[
+                dict(label="All samples", method="update", args=[{"visible": vis_all}]),
                 dict(
-                    label="All samples",
-                    method="update",
-                    args=[{"visible": vis_all}],
-                ),
-                dict(
-                    label=f"ff > {ff_min * 100:.2f}%",
+                    label=f"ff ≥ {ff_min * 100:.0f}%",
                     method="update",
                     args=[{"visible": vis_ff}],
                 ),
@@ -162,18 +176,17 @@ def build_figure(
         )
     ]
 
-    default_step = ez_cutoffs.index(default_ez)
     fig.update_layout(
-        title=dict(text=f"{title}<br><sup>{subtitle}</sup>", x=0.5),
-        height=520,
+        title=dict(text=_full_title(default_ez), x=0.5),
+        height=540,
         width=1200,
         template="plotly_white",
         legend=dict(orientation="h", yanchor="bottom", y=-0.22, x=0.5, xanchor="center"),
-        margin=dict(t=100, b=80),
+        margin=dict(t=120, b=80),
         updatemenus=updatemenus,
         sliders=[
             dict(
-                active=default_step,
+                active=ez_cutoffs.index(default_ez),
                 currentvalue=dict(prefix="ezscore cutoff: "),
                 pad=dict(t=30, b=10),
                 steps=steps,
@@ -194,20 +207,24 @@ def build_figure(
     "--result-dir",
     required=True,
     type=click.Path(exists=True, file_okay=False, path_type=Path),
-    help="Dir containing ref_free_ezscore/ with aggregated TSV + run_config.json",
 )
-@click.option(
-    "--output-html",
-    default=None,
-    type=click.Path(path_type=Path),
-    help="Default: <result-dir>/plots/signal_ratio.html",
-)
+@click.option("--output-html", default=None, type=click.Path(path_type=Path))
 @click.option("--title", default="40+40 reference-free signal ratio", show_default=True)
-@click.option("--ff-min", default=DEFAULT_FF_MIN, show_default=True, type=float,
-              help="Fetal-fraction filter used by the plot toggle button")
-def main(result_dir: Path, output_html: Path | None, title: str, ff_min: float) -> None:
+@click.option("--ff-min", default=DEFAULT_FF_MIN, show_default=True, type=float)
+@click.option(
+    "--scores-tsv",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+def main(
+    result_dir: Path,
+    output_html: Path | None,
+    title: str,
+    ff_min: float,
+    scores_tsv: Path | None,
+) -> None:
     ref_dir = result_dir / "ref_free_ezscore"
-    scores = ref_dir / "abnormality_signal_ratio.tsv"
+    scores = Path(scores_tsv) if scores_tsv else ref_dir / "abnormality_signal_ratio.tsv"
     config_path = ref_dir / "run_config.json"
     if not scores.is_file():
         raise click.ClickException(f"Missing {scores}")
