@@ -4,8 +4,11 @@
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 include { SPLIT_BAM } from '../subworkflows/local/split_bam.nf'
+include { MERGE_CLEAN_BAM } from '../subworkflows/local/merge_clean_bam.nf'
 include { BAM_TO_PILEUP } from '../modules/local/bam_to_pileup/main.nf'
+include { BAM_TO_PILEUP_SINGLE } from '../modules/local/bam_to_pileup_single/main.nf'
 include { ESTIMATE_FF_HIGHER_PRECISION } from '../modules/local/estimate_ff_higher_precision/main.nf'
+include { SUMMARIZE_SNP_FF } from '../modules/local/summarize_snp_ff/main.nf'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -16,8 +19,9 @@ include { ESTIMATE_FF_HIGHER_PRECISION } from '../modules/local/estimate_ff_high
 workflow SNP_EST_FF {
     take:
     ch_samplesheet // channel:
-                   //   est_ff_from_bam    -> [meta, clean_bam, deconv_res]
-                   //   est_ff_from_pileup -> [meta, pileup]
+                   //   est_ff_from_bam                      -> [meta, clean_bam, deconv_res]
+                   //   est_ff_from_bam_without_deconv_res   -> [meta, clean_bam]
+                   //   est_ff_from_pileup                   -> [meta, pileup]
 
     main:
     // Resolve a per-sample merged pileup channel [meta, pileup] regardless of
@@ -33,6 +37,18 @@ workflow SNP_EST_FF {
             file(params.snp_list)
         )
         BAM_TO_PILEUP.out.pileup
+            .set { ch_pileup }
+    } else if (params.step == 'est_ff_from_bam_without_deconv_res') {
+        // Merge multi-BAM samples, then build pileup from the single clean BAM.
+        MERGE_CLEAN_BAM(ch_samplesheet)
+        MERGE_CLEAN_BAM.out.merged_bam
+            .set { ch_merged_bam }
+
+        BAM_TO_PILEUP_SINGLE(
+            ch_merged_bam,
+            file(params.snp_list)
+        )
+        BAM_TO_PILEUP_SINGLE.out.pileup
             .set { ch_pileup }
     } else {
         // est_ff_from_pileup: samplesheet already provides the merged pileup.
@@ -64,9 +80,15 @@ workflow SNP_EST_FF {
             seed: "sample,ff\n"
         )
 
+    // Summarize per-sample FF estimates into one table.
+    SUMMARIZE_SNP_FF(
+        ch_snp_ff.map { meta, ff -> ff }.collect()
+    )
+
     emit:
-    snp_pileup = ch_pileup
-    snp_ff     = ch_snp_ff
+    snp_pileup  = ch_pileup
+    snp_ff      = ch_snp_ff
+    ff_summary  = SUMMARIZE_SNP_FF.out.summary
 }
 
 /*

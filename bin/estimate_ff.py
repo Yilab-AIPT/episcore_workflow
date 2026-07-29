@@ -439,8 +439,9 @@ def load_and_validate_data(
     Load and validate input SNP data from TSV.GZ file.
     
     This function validates the presence of required columns for both cfDNA and
-    cfDNA+model analysis modes. It performs data type validation, cleaning, and
-    applies depth filters.
+    cfDNA+model analysis modes. When model read columns are absent (single-BAM
+    pileups without target/background merge), cfDNA read counts are reused for
+    the model columns so ff_after_mq matches the available data.
     
     Args:
         input_path (Path): Path to input file
@@ -469,18 +470,34 @@ def load_and_validate_data(
     
     # Determine required columns for both modes
     base_columns = {'chr', 'pos', 'af'}
-    required_columns = base_columns.copy()
-    required_columns.update({cfdna_ref_col, cfdna_alt_col, model_ref_col, model_alt_col})
+    cfdna_columns = {cfdna_ref_col, cfdna_alt_col}
+    model_columns = {model_ref_col, model_alt_col}
     read_columns = [cfdna_ref_col, cfdna_alt_col, model_ref_col, model_alt_col]
-    
-    console.print(f"[cyan]Validating columns for both cfDNA and cfDNA+model modes[/cyan]")
+
+    console.print("[cyan]Validating columns for both cfDNA and cfDNA+model modes[/cyan]")
     console.print(f"[cyan]cfDNA columns: {cfdna_ref_col}, {cfdna_alt_col}[/cyan]")
     console.print(f"[cyan]Model columns: {model_ref_col}, {model_alt_col}[/cyan]")
-    
-    # Check for required columns
-    if not required_columns.issubset(df.columns):
-        missing = required_columns - set(df.columns)
-        raise ValueError(f"Missing required columns: {missing}")
+
+    missing_base = base_columns - set(df.columns)
+    if missing_base:
+        raise ValueError(f"Missing required columns: {missing_base}")
+
+    missing_cfdna = cfdna_columns - set(df.columns)
+    if missing_cfdna:
+        raise ValueError(f"Missing required cfDNA columns: {missing_cfdna}")
+
+    missing_model = model_columns - set(df.columns)
+    if missing_model:
+        console.print(
+            "[yellow]Model columns missing "
+            f"({', '.join(sorted(missing_model))}); "
+            "using cfDNA read counts as model reads (single-BAM pileup)[/yellow]"
+        )
+        df = df.copy()
+        if model_ref_col not in df.columns:
+            df[model_ref_col] = df[cfdna_ref_col]
+        if model_alt_col not in df.columns:
+            df[model_alt_col] = df[cfdna_alt_col]
     
     # Basic data validation
     if len(df) == 0:

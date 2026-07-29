@@ -96,7 +96,7 @@ workflow {
         )
     }
 
-    if (params.step in ['est_ff_from_bam', 'est_ff_from_pileup']) {
+    if (params.step in ['est_ff_from_bam', 'est_ff_from_bam_without_deconv_res', 'est_ff_from_pileup']) {
         // Validate and parse samplesheet
         ch_samplesheet = validateAndParseSnpFFSamplesheet(params.input, params.step)
 
